@@ -1,0 +1,51 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "verify:sim": "tsx scripts/verify-simulation.ts",
+    "verify:wheel": "tsx scripts/verify-ferris-wheel.ts",
+    "verify:coaster": "tsx scripts/verify-roller-coaster.ts",
+    "verify:train": "tsx scripts/verify-train-orientation.ts",
+    "verify:monster": "tsx scripts/verify-monster-ride.ts",
+    "verify:monster-motion": "tsx scripts/verify-monster-motion.ts",
+    "verify:train-park": "tsx scripts/verify-park-train.ts",
+    "verify:dragon": "tsx scripts/verify-dragon-ride.ts",
+    "verify:tower": "tsx scripts/verify-drop-tower.ts",
+    "verify:scale": "tsx scripts/verify-park-scale.ts",
+    "verify:layout": "tsx scripts/verify-park-layout.ts",
+    "verify:zoom": "tsx scripts/verify-double-tap-zoom.ts",
+    "verify:departments": "tsx scripts/verify-departments.ts",
+    "verify:ground": "tsx scripts/verify-ground.ts",
+    "verify:journey": "tsx scripts/verify-journey.ts",
+    "verify:legibility": "tsx scripts/verify-legibility.ts",
+    "verify:world": "tsx scripts/verify-world.ts",
+    "verify:night": "tsx scripts/verify-night.ts",
+    "verify:dashboard": "tsx scripts/verify-dashboard.ts"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "next": "16.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "three": "^0.185.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.185.4",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5"
+  }
+}
