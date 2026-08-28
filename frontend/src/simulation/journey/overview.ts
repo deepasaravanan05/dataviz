@@ -1,5 +1,4 @@
-import { DEPARTMENTS } from "@/components/park/departments";
-import { JOURNEY_EMPLOYEES } from "./journey";
+import { JOURNEY_EMPLOYEES, type JourneyEmployee } from "./journey";
 
 /**
  * The department check-in overview: the dashboard's numbers, derived live
@@ -16,7 +15,7 @@ import { JOURNEY_EMPLOYEES } from "./journey";
  *
  * By construction checkedIn = delayed + started at every instant, and at the
  * end of the morning delayed drains to zero. Nothing here is invented: every
- * number is a count over the verbatim 50-row dataset.
+ * number is a count over the verbatim attendance dataset.
  */
 
 export interface DepartmentOverviewRow {
@@ -31,9 +30,24 @@ export interface DepartmentOverviewRow {
   avgDelay: number;
 }
 
-export function departmentOverview(simTime: number): DepartmentOverviewRow[] {
-  return DEPARTMENTS.map(({ department, rideName }) => {
-    const staff = JOURNEY_EMPLOYEES.filter((e) => e.department === department);
+export function departmentOverview(
+  simTime: number,
+  employees: JourneyEmployee[] = JOURNEY_EMPLOYEES,
+): DepartmentOverviewRow[] {
+  /*
+   * Departments in first-seen roster order, each with the ride name the
+   * builder actually assigned. For the built-in dataset this reproduces the
+   * static department table exactly; for an uploaded roster it reports
+   * whatever departments the upload brought.
+   */
+  const departments: { department: string; rideName: string }[] = [];
+  for (const e of employees) {
+    if (!departments.some((d) => d.department === e.department)) {
+      departments.push({ department: e.department, rideName: e.rideName });
+    }
+  }
+  return departments.map(({ department, rideName }) => {
+    const staff = employees.filter((e) => e.department === department);
     const checkedIn = staff.filter((e) => e.checkInTime <= simTime).length;
     const started = staff.filter((e) => e.workStart <= simTime).length;
     return {

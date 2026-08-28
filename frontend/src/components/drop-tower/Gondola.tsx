@@ -14,15 +14,17 @@ import {
   OUTER_HOOP_R,
   PALETTE,
   SEAT_ANGLE_STEP,
+  SEAT_MOUNT_Y,
   SEAT_RING_R,
   TOWER_HALF,
 } from "./constants";
-import { SeatedRider } from "./SeatedRider";
-import { SEAT_COLOR_HEX, TOWER_RIDERS } from "./riders";
+import { TOWER_RIDERS } from "./riders";
+import { SEAT_GREY, SEAT_GREY_DARK, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
+import { RIDE_SEAT_SCALE } from "@/world/scale";
 
 /**
  * The passenger gondola: a red structural spider clamped around the mast,
- * carrying sixty individual outward-facing seats in one ring beneath a
+ * carrying forty individual outward-facing seats in one ring beneath a
  * polygonal canopy.
  *
  * The component's origin is the seat-deck plane. Everything — structure,
@@ -30,7 +32,7 @@ import { SEAT_COLOR_HEX, TOWER_RIDERS } from "./riders";
  * move this group in Y and the whole car travels as one rigid body.
  *
  * `restraintsRef` is handed down from the ride so a single animation loop can
- * drive all sixty shoulder bars; each direct child of that group is one seat's
+ * drive all forty shoulder bars; each direct child of that group is one seat's
  * angular frame, whose own first child is the restraint pivot.
  */
 
@@ -60,28 +62,28 @@ function SeatShell({ color }: { color: string }) {
         <boxGeometry args={[0.3, 0.62, 0.3]} />
         <meshStandardMaterial color={PALETTE.spiderDark} metalness={0.5} roughness={0.45} />
       </mesh>
-      {/* Seat pan — carries the employee's status colour */}
+      {/* Seat pan — grey, like every seat in the park */}
       <mesh position={[0, 0, 0.04]} castShadow receiveShadow>
         <boxGeometry args={[0.82, 0.14, 0.72]} />
-        <meshStandardMaterial color={color} metalness={0.15} roughness={0.55} />
+        <meshStandardMaterial color={color} metalness={SEAT_METALNESS} roughness={SEAT_ROUGHNESS} />
       </mesh>
-      {/* Navy backrest, tipped back slightly */}
+      {/* Backrest, tipped back slightly */}
       <mesh position={[0, 0.62, -0.36]} rotation={[-0.14, 0, 0]} castShadow>
         <boxGeometry args={[0.82, 1.2, 0.16]} />
-        <meshStandardMaterial color={PALETTE.seatShell} metalness={0.2} roughness={0.5} />
+        <meshStandardMaterial color={SEAT_GREY_DARK} metalness={SEAT_METALNESS} roughness={SEAT_ROUGHNESS} />
       </mesh>
       {/* Head/shoulder wings either side, as on the reference's moulded shells */}
       {[-1, 1].map((s) => (
         <mesh key={s} position={[s * 0.39, 0.82, -0.28]} rotation={[-0.14, 0, 0]} castShadow>
           <boxGeometry args={[0.12, 0.72, 0.34]} />
-          <meshStandardMaterial color={PALETTE.seatShellDark} metalness={0.2} roughness={0.5} />
+          <meshStandardMaterial color={SEAT_GREY_DARK} metalness={SEAT_METALNESS} roughness={SEAT_ROUGHNESS} />
         </mesh>
       ))}
       {/* Side bolsters on the pan */}
       {[-1, 1].map((s) => (
         <mesh key={s} position={[s * 0.42, 0.1, 0.04]} castShadow>
           <boxGeometry args={[0.1, 0.26, 0.68]} />
-          <meshStandardMaterial color={PALETTE.seatShellDark} metalness={0.2} roughness={0.55} />
+          <meshStandardMaterial color={SEAT_GREY_DARK} metalness={SEAT_METALNESS} roughness={SEAT_ROUGHNESS} />
         </mesh>
       ))}
     </group>
@@ -126,6 +128,9 @@ export function Gondola({
   showLabels: boolean;
   restraintsRef: RefObject<Group | null>;
 }) {
+  /* Kept so the ride pages\' label toggle still type-checks; the ring no
+     longer carries permanent passengers for it to label. */
+  void showLabels;
   return (
     <group>
       {/* ---------- Collar clamped around the mast ---------- */}
@@ -180,15 +185,25 @@ export function Gondola({
         ))}
       </Instances>
 
-      {/* ---------- Seats + riders ---------- */}
+      {/*
+        ---------- Seats ----------
+
+        Empty until a real employee climbs into one. The ring used to carry
+        permanently-seated figures, which made every seat look occupied
+        whether anybody was in it or not — so a rider who had walked back down
+        the stair left a figure sitting exactly where they had been. The shells,
+        their grey, the restraints and the footrests are untouched.
+      */}
       {TOWER_RIDERS.map((rider) => {
         const a = rider.seatIndex * SEAT_ANGLE_STEP;
         return (
           <group key={rider.seatId} rotation={[0, a, 0]}>
-            <group position={[0, 0, SEAT_RING_R]}>
-              <SeatShell color={SEAT_COLOR_HEX[rider.seatColor]} />
-              <group position={[0, 0.36, -0.06]}>
-                <SeatedRider rider={rider} showLabel={showLabels} />
+            <group position={[0, SEAT_MOUNT_Y, SEAT_RING_R]}>
+              {/* Sized for the people who sit in it — see RIDE_SEAT_SCALE — and
+                  mounted at the lowered height SEAT_MOUNT_Y, which is the same
+                  number rideKinematics.ts seats an employee at. */}
+              <group scale={RIDE_SEAT_SCALE}>
+                <SeatShell color={SEAT_GREY} />
               </group>
             </group>
           </group>
@@ -196,7 +211,7 @@ export function Gondola({
       })}
 
       {/*
-        Restraints live in their own group so one loop can drive all sixty.
+        Restraints live in their own group so one loop can drive all forty.
         Each direct child is a seat's angular frame; its first child is the
         pivot the animation rotates.
       */}
@@ -205,7 +220,10 @@ export function Gondola({
           const a = rider.seatIndex * SEAT_ANGLE_STEP;
           return (
             <group key={rider.seatId} rotation={[0, a, 0]}>
-              <group position={[0, 1.22, SEAT_RING_R - 0.3]} rotation={[0, 0, Math.PI / 2]}>
+              <group
+                position={[0, SEAT_MOUNT_Y + 1.22, SEAT_RING_R - 0.3]}
+                rotation={[0, 0, Math.PI / 2]}
+              >
                 <Restraint />
               </group>
             </group>

@@ -8,8 +8,10 @@ import { JOURNEY_EMPLOYEES, type CheckInColor, type JourneyEmployee } from "./jo
  * module the HUD renders and the verification script re-derives independently,
  * rather than being computed inside a component where it could not be checked.
  *
- * Everything is derived once at module load. The dataset is static, so a
- * breakdown costs nothing per frame.
+ * Every breakdown is a pure function of a roster, so the HUD can run them
+ * over whichever roster is active — built-in or uploaded — while the module
+ * constants below keep serving the built-in dataset to everything that quotes
+ * it statically (and to the verify suite).
  */
 
 export interface DelayGroup {
@@ -36,29 +38,36 @@ function group(key: string, label: string, list: JourneyEmployee[]): DelayGroup 
   };
 }
 
-export const AVERAGE_DELAY = averageDelay(JOURNEY_EMPLOYEES);
-
 const BANDS: CheckInColor[] = ["GREEN", "YELLOW", "RED"];
 
 /** Delay by check-in band — does arriving later also mean starting later? */
-export const DELAY_BY_BAND: DelayGroup[] = BANDS.map((band) =>
-  group(band, band, JOURNEY_EMPLOYEES.filter((e) => e.color === band)),
-);
+export function delayByBand(list: JourneyEmployee[]): DelayGroup[] {
+  return BANDS.map((band) => group(band, band, list.filter((e) => e.color === band)));
+}
 
 /** Delay by department, in the order the departments appear in the roster. */
-export const DELAY_BY_DEPARTMENT: DelayGroup[] = Array.from(
-  new Set(JOURNEY_EMPLOYEES.map((e) => e.department)),
-).map((department) =>
-  group(department, department, JOURNEY_EMPLOYEES.filter((e) => e.department === department)),
-);
+export function delayByDepartment(list: JourneyEmployee[]): DelayGroup[] {
+  return Array.from(new Set(list.map((e) => e.department))).map((department) =>
+    group(department, department, list.filter((e) => e.department === department)),
+  );
+}
 
-/** The single worst wait in the roster. */
-export const WORST_DELAY: JourneyEmployee = JOURNEY_EMPLOYEES.reduce((worst, e) =>
-  e.delayMinutes > worst.delayMinutes ? e : worst,
-);
+/** The single worst wait in a roster. */
+export function worstDelay(list: JourneyEmployee[]): JourneyEmployee {
+  return list.reduce((worst, e) => (e.delayMinutes > worst.delayMinutes ? e : worst));
+}
 
 /** Longest bar in either breakdown, so both are drawn to one scale. */
-export const MAX_GROUP_AVERAGE = Math.max(
-  ...DELAY_BY_BAND.map((d) => d.average),
-  ...DELAY_BY_DEPARTMENT.map((d) => d.average),
-);
+export function maxGroupAverage(list: JourneyEmployee[]): number {
+  return Math.max(
+    ...delayByBand(list).map((d) => d.average),
+    ...delayByDepartment(list).map((d) => d.average),
+  );
+}
+
+/* The built-in dataset's breakdowns, exactly as before. */
+export const AVERAGE_DELAY = averageDelay(JOURNEY_EMPLOYEES);
+export const DELAY_BY_BAND: DelayGroup[] = delayByBand(JOURNEY_EMPLOYEES);
+export const DELAY_BY_DEPARTMENT: DelayGroup[] = delayByDepartment(JOURNEY_EMPLOYEES);
+export const WORST_DELAY: JourneyEmployee = worstDelay(JOURNEY_EMPLOYEES);
+export const MAX_GROUP_AVERAGE = maxGroupAverage(JOURNEY_EMPLOYEES);

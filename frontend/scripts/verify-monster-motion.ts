@@ -14,6 +14,8 @@ import {
   MIN_GROUND_CLEARANCE,
   terrainHeightAt,
 } from "../src/components/monster-ride/groundClearance";
+import { rideScale } from "../src/components/park/layout";
+import { EMPLOYEE_HEIGHT } from "../src/world/scale";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -75,6 +77,19 @@ check(
   "cart bottom never dips below ground + min clearance, across full cycle",
   minClearanceSeen >= MIN_GROUND_CLEARANCE - 1e-6,
   `worst-case clearance ${minClearanceSeen.toFixed(4)}u (required >= ${MIN_GROUND_CLEARANCE}u), over ${samples.length} samples across ${ARM_COUNT} arms x ${DURATION}s`,
+);
+
+/*
+ * The clearance that actually matters is the one a visitor SEES, and that is
+ * measured in world units against the people standing under the ride — not in
+ * the ride's own units. At 0.94u of local clearance the tubs read as sitting in
+ * the grass; the requirement is a band of daylight at least one employee tall.
+ */
+const worldClearance = minClearanceSeen * rideScale("monster");
+check(
+  "a visitor sees daylight under the tubs, measured against the people below",
+  worldClearance >= EMPLOYEE_HEIGHT,
+  `${worldClearance.toFixed(2)} world units of clearance = ${(worldClearance / EMPLOYEE_HEIGHT).toFixed(2)} employee heights`,
 );
 
 const violations = samples.filter((s) => s.cartY - s.groundY < MIN_GROUND_CLEARANCE - 1e-6);

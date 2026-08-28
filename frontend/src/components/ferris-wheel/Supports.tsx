@@ -11,9 +11,11 @@ import {
   SUPPORT_Z_OFFSET,
   WHEEL_CENTER_HEIGHT,
 } from "./constants";
+import { RIDE_PAINT } from "@/world/ridePaint";
 
-const STEEL = "#8d949e";
-const STEEL_DARK = "#606670";
+/* The A-frames carry the same paint as the wheel they hold up. */
+const STEEL = RIDE_PAINT.ferris.light;
+const STEEL_DARK = RIDE_PAINT.ferris.dark;
 const CONCRETE = "#9c9ea3";
 
 function lerp2(a: [number, number], b: [number, number], t: number): [number, number] {
@@ -103,7 +105,7 @@ export function Supports() {
       {[SUPPORT_Z_OFFSET, -SUPPORT_Z_OFFSET].map((z) => (
         <mesh key={z} position={[0, bearingY, z]} castShadow>
           <boxGeometry args={[1.5, 1.5, 0.6]} />
-          <meshStandardMaterial color="#565c66" metalness={0.88} roughness={0.26} />
+          <meshStandardMaterial color={STEEL_DARK} metalness={0.88} roughness={0.26} />
         </mesh>
       ))}
     </group>

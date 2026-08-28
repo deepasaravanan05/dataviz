@@ -1,6 +1,11 @@
 "use client";
 
 import { Text } from "@react-three/drei";
+import { useMemo } from "react";
+import {
+  activeDepartmentsForRide,
+  useActiveJourneyStore,
+} from "@/simulation/journey/activeJourney";
 import {
   RIDE_SIGNS,
   SIGN_BOARD_BOTTOM,
@@ -31,6 +36,22 @@ const POST = "#8d99a8";
 const BOARD_MID = SIGN_BOARD_BOTTOM + SIGN_BOARD_HEIGHT / 2;
 
 function Sign({ sign }: { sign: RideSign }) {
+  /*
+   * The lettering follows the ACTIVE roster: the built-in mapping's names by
+   * default, and after an upload the departments whose staff actually walk to
+   * this ride. A ride an upload sends nobody to keeps its built-in label —
+   * a blank signboard would read as a broken one. Geometry and placement are
+   * untouched either way.
+   */
+  const source = useActiveJourneyStore((s) => s.source);
+  const revision = useActiveJourneyStore((s) => s.revision);
+  const departments = useMemo(() => {
+    if (source === "builtin") return sign.departments;
+    const active = activeDepartmentsForRide(sign.rideId);
+    return active.length > 0 ? active : sign.departments;
+    // revision re-runs this when a new roster lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, revision, sign]);
   return (
     <group position={[sign.position[0], 0, sign.position[1]]} rotation={[0, sign.facing, 0]}>
       {/* Plinth */}
@@ -63,12 +84,12 @@ function Sign({ sign }: { sign: RideSign }) {
           inside the park. Lettering shrinks to fit the board, so a long name
           like "Data Engineering" never bleeds past the edge. */}
       {[0.085, -0.085].map((z) => {
-        const longest = Math.max(...sign.departments.map((d) => d.length));
+        const longest = Math.max(...departments.map((d) => d.length));
         const deptSize = Math.min(0.66, (SIGN_HALF_WIDTH * 2 - 0.5) / (longest * 0.56));
-        const two = sign.departments.length > 1;
+        const two = departments.length > 1;
         return (
           <group key={z} position={[0, 0, z]} rotation={[0, z > 0 ? 0 : Math.PI, 0]}>
-            {sign.departments.map((dept, i) => (
+            {departments.map((dept, i) => (
               <Text
                 key={dept}
                 position={[0, BOARD_MID + (two ? 0.52 - i * (deptSize + 0.16) : 0.32), 0]}

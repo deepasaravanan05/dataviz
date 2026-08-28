@@ -102,12 +102,6 @@ export default function DragonRidePage() {
           Roller Coaster
         </Link>
         <Link
-          href="/ferris-wheel"
-          className="rounded-full bg-black/65 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-black/80"
-        >
-          Ferris Wheel
-        </Link>
-        <Link
           href="/"
           className="rounded-full bg-black/65 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-black/80"
         >

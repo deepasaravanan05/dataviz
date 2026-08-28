@@ -12,12 +12,15 @@ import { Track as TrainTrack } from "@/components/park-train/Track";
 import { ParkTrain } from "@/components/park-train/ParkTrain";
 import { DragonRide } from "@/components/dragon-ride/DragonRide";
 import { DropTower } from "@/components/drop-tower/DropTower";
-import { PARK_SCALE, TRAIN_SCALE } from "@/components/park/parkScale";
+import { TRAIN_SCALE } from "@/components/park/parkScale";
+import { SKY_THEMES } from "@/components/world/skyThemes";
+import { useSkyThemeStore } from "@/store/skyThemeStore";
 import { DoubleTapZoom } from "@/components/park/DoubleTapZoom";
 import { ParkJourney } from "@/components/park/journey/ParkJourney";
 import { RideDepartmentSigns } from "@/components/park/RideDepartmentSign";
 import { ParkEnvironment } from "@/components/world/ParkEnvironment";
 import { Fountain } from "@/components/world/Fountain";
+import { FerrisWheelBench } from "@/components/world/PromenadeBench";
 import { CameraDirector } from "@/components/world/CameraDirector";
 import { NightSky } from "@/components/world/NightSky";
 import { RideLights, TrainRig } from "@/components/world/rideLighting";
@@ -26,7 +29,8 @@ import { RidePlazas } from "@/components/world/RidePlaza";
 import { RideHighlights, SelectableRide } from "@/components/park/SelectableRide";
 import { useRideSelectionStore } from "@/store/rideSelectionStore";
 import { useJourneyStore } from "@/store/journeyStore";
-import { PLAZA_CENTER, PLAZA_RADIUS, offsetFor } from "@/components/park/layout";
+import { useFoodCourtStore } from "@/store/foodCourtStore";
+import { PLAZA_CENTER, PLAZA_RADIUS, offsetFor, rideScale } from "@/components/park/layout";
 
 /**
  * Opening shot: the solved full-park overview, from which every one of the six
@@ -47,7 +51,16 @@ export interface ParkSceneProps {
   showDragonLabels?: boolean;
   /** Show the per-employee time labels on the Drop Tower. */
   showTowerLabels?: boolean;
+  /**
+   * Vertical field of view. Defaults to the park's standard wide framing; the
+   * entrance passes a longer lens so the rides read at the size they do in the
+   * project's reference art, without a single ride changing size or position.
+   */
+  cameraFov?: number;
 }
+
+/** The park's standard lens. */
+export const DEFAULT_FOV = 46;
 
 export function ParkScene({
   cameraPosition = CAMERA_POSITION,
@@ -56,16 +69,20 @@ export function ParkScene({
   showTrainLabels = false,
   showDragonLabels = false,
   showTowerLabels = false,
+  cameraFov = DEFAULT_FOV,
 }: ParkSceneProps = {}) {
+  const skyTheme = useSkyThemeStore((s) => s.theme);
+  const sky = SKY_THEMES[skyTheme];
   const clearRideSelection = useRideSelectionStore((s) => s.clear);
   const clearEmployeeSelection = useJourneyStore((s) => s.clear);
+  const clearFoodCourtSelection = useFoodCourtStore((s) => s.clear);
 
   return (
     <Canvas
       shadows
       // `far` must clear the fog distance, or the ground would be clipped
       // before it has faded out and the cut edge would be visible.
-      camera={{ position: cameraPosition, fov: 46, near: 1, far: 12000 }}
+      camera={{ position: cameraPosition, fov: cameraFov, near: 1, far: 12000 }}
       // Keeps depth precision usable now the view range spans 1..12000.
       gl={{
         logarithmicDepthBuffer: true,
@@ -73,7 +90,7 @@ export function ParkScene({
         // Slightly under 1: the park is lit almost entirely by emissive
         // architecture, and pulling exposure down is what keeps the darkness
         // dark while the LEDs still read as light sources rather than paint.
-        toneMappingExposure: 0.92,
+        toneMappingExposure: sky.toneMappingExposure,
       }}
       // Keeps the browser from zooming the page on a double tap, so the
       // gesture reaches the camera instead.
@@ -82,9 +99,10 @@ export function ParkScene({
       onPointerMissed={() => {
         clearRideSelection();
         clearEmployeeSelection();
+        clearFoodCourtSelection();
       }}
     >
-      <color attach="background" args={["#05070f"]} />
+      <color attach="background" args={[sky.background]} />
       <fog
         attach="fog"
         /*
@@ -94,7 +112,7 @@ export function ParkScene({
          * it closes well short of the ground's edge, so the land fades into
          * the night instead of ending at a line.
          */
-        args={["#0a1020", 900, 4200]}
+        args={[sky.fog.color, sky.fog.near, sky.fog.far]}
       />
 
       <NightSky />
@@ -107,17 +125,17 @@ export function ParkScene({
         illumination comes from its own emissive architecture, which is what
         keeps a world this lit from needing hundreds of dynamic lights.
       */}
-      <ambientLight intensity={0.16} color="#24304a" />
-      <hemisphereLight args={["#1c2c4a", "#070a11", 0.34]} />
+      <ambientLight intensity={sky.ambient.intensity} color={sky.ambient.color} />
+      <hemisphereLight args={[sky.hemisphere.sky, sky.hemisphere.ground, sky.hemisphere.intensity]} />
       {/*
         Same sun as always: identical direction, intensity and colour. Only the
         shadow frustum is widened — and the map enlarged to match — so the
         spread-out park still receives shadows to its edges.
       */}
       <directionalLight
-        position={[-210, 320, -150]}
-        intensity={0.62}
-        color="#a8c4ff"
+        position={sky.key.position}
+        intensity={sky.key.intensity}
+        color={sky.key.color}
         castShadow
         shadow-mapSize={[4096, 4096]}
         shadow-camera-left={-430}
@@ -126,20 +144,20 @@ export function ParkScene({
         shadow-camera-bottom={-420}
         shadow-camera-far={2100}
       />
-      <directionalLight position={[120, 60, 180]} intensity={0.12} color="#5f7bb0" />
+      <directionalLight position={sky.fill.position} intensity={sky.fill.intensity} color={sky.fill.color} />
 
       <Suspense fallback={null}>
         <Environment resolution={256}>
           <Lightformer
-            intensity={0.32}
-            color="#8ea8d8"
+            intensity={sky.environment.intensity}
+            color={sky.environment.top}
             position={[0, 30, 0]}
             scale={[60, 60, 1]}
             rotation={[-Math.PI / 2, 0, 0]}
             form="rect"
           />
-          <Lightformer intensity={0.22} color="#7f9ad0" position={[-40, 14, 30]} scale={20} form="ring" />
-          <Lightformer intensity={0.18} color="#c79a63" position={[60, 12, -30]} scale={18} form="ring" />
+          <Lightformer intensity={sky.environment.intensity * 0.7} color={sky.environment.ringA} position={[-40, 14, 30]} scale={20} form="ring" />
+          <Lightformer intensity={sky.environment.intensity * 0.56} color={sky.environment.ringB} position={[60, 12, -30]} scale={18} form="ring" />
         </Environment>
       </Suspense>
 
@@ -153,6 +171,10 @@ export function ParkScene({
       {/* The central landmark: a fountain, never a ride. Routes bend around it. */}
       <Fountain />
 
+      {/* One wooden promenade bench, on open ground beside the Ferris Wheel and
+          facing it. An addition; it touches nothing. */}
+      <FerrisWheelBench />
+
       {/* Ground and plaza stay in unscaled world space. */}
       <ParkGround
         // Half-extent 7000u. The camera can orbit out to 1800u and fog closes
@@ -161,11 +183,13 @@ export function ParkScene({
         size={14000}
         plazaRadius={PLAZA_RADIUS}
         plazaCenter={PLAZA_CENTER}
-        // Night landscape: dark, but never pure black — the ground still has to
-        // read as planted ground rather than a void.
-        grassColor="#16251a"
-        plazaColor="#2a2d33"
-        plazaRimColor="#1e2126"
+        // Warm evening landscape, matching the project's sunset reference:
+        // the ground keeps its dark value so the night reads as night, but the
+        // hue is pulled from cold green-grey to a warm lamplit earth. Never
+        // pure black — the ground still has to read as planted ground.
+        grassColor={sky.ground.grass}
+        plazaColor={sky.ground.plaza}
+        plazaRimColor={sky.ground.plazaRim}
       />
 
       {/*
@@ -177,7 +201,7 @@ export function ParkScene({
       */}
       <SelectableRide id="ferris">
         <group position={offsetFor("ferris")}>
-          <group scale={PARK_SCALE}>
+          <group scale={rideScale("ferris")}>
             <FerrisWheel />
             <RideLights id="ferris" />
           </group>
@@ -186,7 +210,7 @@ export function ParkScene({
 
       <SelectableRide id="coaster">
         <group position={offsetFor("coaster")}>
-          <group scale={PARK_SCALE}>
+          <group scale={rideScale("coaster")}>
             <RollerCoaster />
             <RideLights id="coaster" />
           </group>
@@ -195,7 +219,7 @@ export function ParkScene({
 
       <SelectableRide id="monster">
         <group position={offsetFor("monster")}>
-          <group scale={PARK_SCALE}>
+          <group scale={rideScale("monster")}>
             <MonsterRide showLabels={showRiderLabels} />
             <RideLights id="monster" />
           </group>
@@ -204,7 +228,7 @@ export function ParkScene({
 
       <SelectableRide id="dragon">
         <group position={offsetFor("dragon")}>
-          <group scale={PARK_SCALE}>
+          <group scale={rideScale("dragon")}>
             <DragonRide showLabels={showDragonLabels} />
             <RideLights id="dragon" />
           </group>

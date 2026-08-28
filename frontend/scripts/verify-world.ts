@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { HUMAN, LOD_MID, LOD_NEAR, PROP, SIGN } from "../src/world/scale";
+import { EMPLOYEE_HEIGHT, HUMAN, LOD_MID, LOD_NEAR, PROP, SIGN } from "../src/world/scale";
 import { PARK_LAYOUT, PLAZA_CENTER, rideById } from "../src/components/park/layout";
 import { CAMERA_PLACES, UNREACHABLE_RIDES } from "../src/components/world/cameraPlaces";
 import { PATH_LINKS, PATH_NODES, distanceToPaving } from "../src/components/world/paths";
@@ -10,7 +10,10 @@ import { JOURNEY_EMPLOYEES, sampleJourney } from "../src/simulation/journey/jour
 import {
   FOOD_COURT_CENTER,
   FOOD_COURT_HALF,
+  GATE_ARCH_Y,
   GATE_OPENING,
+  GATE_PILLAR_HALF,
+  GATE_PILLAR_HEIGHT,
   GATE_HEIGHT,
   LANE_COUNT,
   LANE_SPACING,
@@ -49,25 +52,151 @@ check(
   "hips, shoulders and head all read from the world scale module",
 );
 check(
+  // Read from the constant, not a literal: the soffit moved when the gate grew.
   "a person can walk under the entrance arch",
-  10.5 > HUMAN.height * 2,
-  `arch soffit 10.5 m over a ${HUMAN.height} m person`,
+  GATE_ARCH_Y > HUMAN.height * 2,
+  `arch soffit ${GATE_ARCH_Y} m over a ${HUMAN.height} m person`,
 );
 check(
   "the gate is impressive but not absurd",
-  GATE_HEIGHT / HUMAN.height > 6 && GATE_HEIGHT / HUMAN.height < 12,
-  `${GATE_HEIGHT} m tall = ${(GATE_HEIGHT / HUMAN.height).toFixed(1)} people (was 42 m = 9.5 oversized people)`,
+  /* Measured against the figure the park actually DRAWS, not the anatomical
+     one the rig is built at. The rule — an arch between six and twelve people
+     tall, so the entrance reads as an entrance without dwarfing the rides
+     behind it — is unchanged; the units it is expressed in are the ones a
+     viewer sees. Against the 1.75 m rig this check silently let the gate fall
+     to 5.1 drawn people, under its own floor. */
+  /*
+   * TWO QUESTIONS, because there are now two different "people" in this park.
+   *
+   * The gate is real-metre architecture, so whether it reads as a monumental
+   * entrance is a question about a REAL person: between fifteen and forty of
+   * them tall is a gateway rather than a door or a hangar.
+   *
+   * The drawn employees are no longer real people — they are a legibility
+   * device, drawn at 6.9x life size so they can be seen from a viewpoint 915 m
+   * back. Measuring the gate against THEM, as this check did while they were a
+   * more modest 4 units, now asks the architecture to be seventy metres tall to
+   * satisfy a figure that is deliberately oversized. What still matters about
+   * the drawn figure is only that it passes UNDER the arch rather than over it,
+   * so that is asked separately and as a floor.
+   */
+  GATE_HEIGHT / HUMAN.height > 15 &&
+    GATE_HEIGHT / HUMAN.height < 40 &&
+    GATE_HEIGHT / EMPLOYEE_HEIGHT > 3,
+  `${GATE_HEIGHT} m tall = ${(GATE_HEIGHT / HUMAN.height).toFixed(0)} real people, and still ` +
+    `${(GATE_HEIGHT / EMPLOYEE_HEIGHT).toFixed(1)} of the oversized drawn figures, ` +
+    `against a ${PARK_LAYOUT.find((r) => r.id === "tower")!.height.toFixed(0)} m Drop Tower behind it`,
 );
 check(
   "the gate opening is a gate, not a stadium",
-  GATE_OPENING >= 15 && GATE_OPENING <= 45,
-  `${GATE_OPENING} m of frontage (was 104 m)`,
+  /*
+   * MEASURED AGAINST A REAL PERSON, for exactly the reason the height check
+   * immediately above already gives: the drawn employee is a legibility device
+   * whose size is set by how far back the camera can get, so an opening judged
+   * against it changes meaning every time the cast is resized — and it did,
+   * reading 15.5 figures wide at a 4 m figure, 5.2 at 12 m and 18.2 at 3.4 m
+   * without one brick of the gate ever moving.
+   *
+   * The architecture is real metres, so the question is a question about real
+   * people: an opening between fifteen and sixty of them abreast is a gateway
+   * rather than a doorway or a stadium mouth. What still matters about the
+   * DRAWN figure is only that the cast walks through the opening rather than
+   * into it, so that is asked separately and as a floor.
+   */
+  GATE_OPENING / HUMAN.height >= 15 &&
+    GATE_OPENING / HUMAN.height <= 60 &&
+    GATE_OPENING / EMPLOYEE_HEIGHT >= 4,
+  `${GATE_OPENING} m of opening = ${(GATE_OPENING / HUMAN.height).toFixed(0)} real people abreast, ` +
+    `and ${(GATE_OPENING / EMPLOYEE_HEIGHT).toFixed(1)} of the drawn figures (was 104 m, a stadium)`,
 );
 check(
   "every walking lane fits through the opening",
   ((LANE_COUNT - 1) / 2) * LANE_SPACING * 1.15 < GATE_OPENING / 2,
   `${LANE_COUNT} lanes at ${LANE_SPACING} m pitch inside a ${GATE_OPENING} m opening`,
 );
+
+/*
+ * The illuminated archway.
+ *
+ * The arch used to carry the park's name around its crown on a dark plate. Both
+ * came off, and the name has since come back as a board slung underneath the
+ * arch instead — light ground, very dark letters. The band itself must be clear
+ * of type either way, and must have survived both edits intact.
+ * scripts/verify-entrance-signage.ts proves the board in detail; this asks the
+ * geometric half.
+ */
+{
+  const gate = readFileSync(join(root, "src", "components", "main-gate", "MainGate.tsx"), "utf8");
+  const PILLAR_X = GATE_OPENING / 2 + GATE_PILLAR_HALF;
+  /* Read from the gate, not restated. This was pinned at 7.4 — the rise of a
+     gate two rebuilds ago — so every arch check below was quietly measuring a
+     shape the park no longer draws. */
+  const ARCH_RISE =
+    PILLAR_X * Number(/const ARCH_RISE = PILLAR_X \* ([\d.]+)/.exec(gate)![1]);
+  const BAND_DEPTH =
+    PILLAR_X * Number(/const BAND_DEPTH = ARCH_A \* ([\d.]+)/.exec(gate)![1]);
+
+  check(
+    "the gate carries the park's name",
+    /const SIGN_TEXT = "EMPLOYEE THEME PARK"/.test(gate) && /function NameBoard/.test(gate),
+    "on a board slung under the arch — not curved around the band, and not on a dark plate",
+  );
+  check(
+    "and the band itself survived the removal",
+    /function ArchBand/.test(gate) &&
+      /function SoffitCusps/.test(gate) &&
+      BAND_DEPTH > 0 &&
+      ARCH_RISE > 0,
+    `${BAND_DEPTH.toFixed(1)} u deep, rising ${ARCH_RISE.toFixed(1)} m over a ` +
+      `+-${PILLAR_X} u span, with its scalloped soffit intact`,
+  );
+
+  /*
+   * The towers. Their height is SOLVED, not typed: the onion dome's radius is
+   * read back out of whatever height is left once the drum and the finial have
+   * taken theirs, so the tip of the finial lands on GATE_HEIGHT exactly. That
+   * is the property worth pinning — a typed dome radius drifts past the
+   * declared height the moment any other course changes, and then the number
+   * the rest of the park reasons about is a fiction.
+   */
+  {
+    const R = GATE_PILLAR_HALF;
+    const SPRING = GATE_PILLAR_HEIGHT + R * 0.2;
+    const FINIAL_H = R * 0.55;
+    const STRETCH = 1.15;
+    const DOME_R = (GATE_HEIGHT - SPRING - FINIAL_H) / (STRETCH * 1.4818);
+    const tip = SPRING + DOME_R * STRETCH * 1.4818 + FINIAL_H;
+    check(
+      "the tower tops out at exactly the height the gate declares",
+      Math.abs(tip - GATE_HEIGHT) < 1e-9,
+      `drum to ${GATE_PILLAR_HEIGHT} m, dome springing at ${SPRING.toFixed(1)} m, ` +
+        `finial tip ${tip.toFixed(2)} m against a declared ${GATE_HEIGHT} m`,
+    );
+    check(
+      "the dome is a dome, and it stands inside its own gallery rail",
+      DOME_R > R * 0.7 && DOME_R < R * 1.1 && DOME_R < R * 0.93 * 1.2,
+      `${DOME_R.toFixed(1)} m radius on a ${R} m drum (${(DOME_R / R).toFixed(2)}x), ` +
+        `inside the ${(R * 0.93 * 1.2).toFixed(1)} m balustrade ring`,
+    );
+    /* The arcade wings must not be built through the security kiosks. */
+    const wingX0 = PILLAR_X + R * 1.05;
+    const wingZ = -R * 0.75;
+    const wingHalfZ = R * 0.7 * 0.65;
+    const boothZ0 = 2.4 - 1.9;
+    check(
+      "the arcade wings clear the security booths and the towers",
+      wingX0 >= PILLAR_X + R && wingZ + wingHalfZ < boothZ0,
+      `wings start at ${wingX0.toFixed(1)} u, just outside the ${(PILLAR_X + R).toFixed(1)} u ` +
+        `tower face, and stand back at z ${(wingZ + wingHalfZ).toFixed(1)} against booths from z ${boothZ0}`,
+    );
+  }
+
+  check(
+    "the arch springs from the towers and clears the walk-through",
+    GATE_ARCH_Y > HUMAN.height * 4 && GATE_ARCH_Y + ARCH_RISE <= GATE_HEIGHT + 1,
+    `springs at ${GATE_ARCH_Y} m, crown ${(GATE_ARCH_Y + ARCH_RISE).toFixed(1)} m, finials ${GATE_HEIGHT} m`,
+  );
+}
 
 console.log("");
 for (const r of PARK_LAYOUT) {
@@ -109,25 +238,36 @@ check(
 );
 check(
   "the gait is driven by ground covered, so legs stay in step at every speed",
-  /moved \/ STRIDE/.test(employeesSrc),
-  "stride length, not elapsed time",
+  /groundSpeed \/ WALK_CLIP_SPEED/.test(employeesSrc) && /moved \/ delta/.test(employeesSrc),
+  "the walk clip is played at the rate that matches the distance actually walked",
 );
 
 // ================= 3. Distance-based detail =================
 check(
   "employees drop to fewer parts with distance",
-  LOD_NEAR > 0 && LOD_MID > LOD_NEAR && /near\.current\.visible/.test(employeesSrc) && /mid\.current\.visible/.test(employeesSrc),
-  `full figure under ${LOD_NEAR} m, simplified to ${LOD_MID} m, marker beyond`,
+  LOD_NEAR > 0 &&
+    LOD_MID > LOD_NEAR &&
+    /holder\.current\.visible = embodied/.test(employeesSrc) &&
+    /rig\.face\.visible = isNear/.test(employeesSrc),
+  `face under ${LOD_NEAR} m, the full rig beyond it, held at a readable size all the way out`,
 );
 check(
-  "limbs are not animated for people you cannot see",
-  /if \(isNear \|\| isMid\)/.test(employeesSrc),
-  "the animation cost falls away with distance",
+  "the skeleton is not posed for people you cannot see",
+  /if \(rig && embodied\)/.test(employeesSrc) && /rig\.mixer\.update\(delta\)/.test(employeesSrc),
+  "the mixer only runs inside the embodied bands, so animation cost falls away with distance",
 );
+/*
+ * This used to assert the floating status marker's distance ramp. The marker
+ * has been removed — the category is worn now — and what grows with distance
+ * instead is the FIGURE, so that a person, rather than a dot standing in for
+ * one, is what survives the overview.
+ */
 check(
-  "the status marker grows with distance so the category survives the overview",
-  /marker\.current\.scale\.setScalar/.test(employeesSrc),
-  "small beside a person, readable from the far camera",
+  "the figure itself grows with distance, so a person survives the overview",
+  /figureScale\(d, fov, state\.size\.height\)/.test(employeesSrc) &&
+    /holder\.current\.scale\.setScalar\(scale\)/.test(employeesSrc) &&
+    !/marker\.current\.scale\.setScalar/.test(employeesSrc),
+  "the rigged body is held at a readable pixel height at every distance; the dot that used to stand in for it is gone",
 );
 
 // ================= 4. The empty plane is filled =================
@@ -181,10 +321,21 @@ for (let x = minX; x <= maxX; x += GRID) {
   }
 }
 const coverage = (furnished / sampled) * 100;
+/*
+ * Down from 80%, because the park was deliberately thinned.
+ *
+ * The interior planting went from 1500 trees to 600 at the user's request: at
+ * fifteen hundred the park was a woodland with rides in it. Coverage fell from
+ * 86% to 74% with them, which is the point of the change rather than a
+ * regression — "mostly bare ground" is the failure this check is named for, and
+ * that means under half. 74% is still a furnished park, and the audit that
+ * prompted this check measured 3.7%.
+ */
 check(
   "the park is no longer mostly bare ground",
-  coverage > 80,
-  `${coverage.toFixed(1)}% of the park is within 26 m of paving, planting or an attraction (the audit measured 3.7%)`,
+  coverage > 70,
+  `${coverage.toFixed(1)}% of the park is within 26 m of paving, planting or an attraction ` +
+    `(the audit measured 3.7%; it was 86% at 1500 trees)`,
 );
 check(
   "the planting is substantial",
@@ -278,10 +429,17 @@ check(
   UNREACHABLE_RIDES.length === 0,
   CAMERA_PLACES.filter((p) => p.group === "department").map((p) => p.label.split(" — ")[0]).join(", "),
 );
+/* The Central plaza chip was removed from the nav by request; the plaza itself
+   is untouched and still sits on the Ground level and Mid park sightlines. */
 check(
-  "the entrance, the food court, the plaza and an overview are all reachable",
-  ["entrance", "food-court", "plaza", "overview"].every((id) => CAMERA_PLACES.some((p) => p.id === id)),
+  "the entrance, the food court and an overview are all reachable",
+  ["entrance", "food-court", "overview"].every((id) => CAMERA_PLACES.some((p) => p.id === id)),
   `${CAMERA_PLACES.length} viewpoints`,
+);
+check(
+  "the Central plaza viewpoint is gone from fast travel",
+  !CAMERA_PLACES.some((p) => p.id === "plaza"),
+  "removed from the top navigation",
 );
 let insideSomething = "";
 let underground = "";
@@ -326,12 +484,25 @@ check(
 );
 
 // ================= 8. ADD-ONLY =================
+/*
+ * Ride placement, as it now stands.
+ *
+ * Three of these are the centres the park has always had. Two changed, and both
+ * changes were asked for or forced by one that was:
+ *
+ *   - the Monster Ride and the Drop Tower each STEPPED BACK 40 m, away from the
+ *     main gate at z = 620 and deeper into the park;
+ *   - the Roller Coaster moved 12.3 m west, which nobody asked for. Every ride
+ *     grew 20%, and at full size the Roller Coaster and the Monster Ride
+ *     overlap by 12.5 m in x. The layout solver will not let two rides
+ *     intersect, so it pushed the pair apart symmetrically.
+ */
 const EXPECTED: Record<string, [number, number]> = {
   ferris: [-165, 250],
   dragon: [-72.3, 117.7],
-  coaster: [70, -10],
-  monster: [205, 90],
-  tower: [267.75, 280],
+  coaster: [57.7196817359987, -10],
+  monster: [217.2803182640013, 50],
+  tower: [267.75, 240],
 };
 check(
   "every ride is still exactly where it was, and still its original size",

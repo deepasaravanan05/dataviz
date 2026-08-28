@@ -9,6 +9,7 @@ import {
   SWING_MAX,
   SWING_PERIOD,
 } from "./constants";
+import { DRAGON_SPHERES } from "./dragonProfile";
 
 /**
  * Pure swing kinematics for the Dragon Swing Ship.
@@ -64,23 +65,52 @@ export const HULL_LOCAL = {
 } as const;
 
 /**
- * Lowest world-space Y reached by the hull at a given swing angle.
- *
- * The ship rotates about the pivot's X axis, so for a local point (y, z):
+ * The ship rotates about the pivot's X axis, so a local point (y, z) maps to
  *   y_world = PIVOT_Y + y*cos(theta) - z*sin(theta)
- * Over the box, cos(theta) > 0 across the whole swing range, so the minimum is
- * always the keel (y = yBottom) at whichever end the rotation is driving down.
+ *   z_world =           y*sin(theta) + z*cos(theta)
+ * and x is untouched. Both sweeps below are that one rotation, applied to the
+ * hull box and to every sphere of the carved dragon.
+ *
+ * The hull is a box: cos(theta) > 0 across the whole swing range, so its lowest
+ * point is always the keel at whichever end the rotation is driving down, and
+ * its farthest point is always a bottom corner.
  */
-export function lowestHullY(theta: number): number {
+function hullLowestY(theta: number): number {
   return (
     PIVOT_Y + HULL_LOCAL.yBottom * Math.cos(theta) - HULL_LOCAL.halfLength * Math.abs(Math.sin(theta))
   );
 }
 
-/** Farthest horizontal distance the hull reaches from the ride's centre line. */
-export function maxHullHorizontalReach(theta: number): number {
+function hullReach(theta: number): number {
   return (
     Math.abs(HULL_LOCAL.yBottom) * Math.abs(Math.sin(theta)) +
     HULL_LOCAL.halfLength * Math.cos(theta)
   );
+}
+
+/**
+ * Lowest world-space Y reached by ANY part of the ship at a given swing angle —
+ * the hull, or the neck, head or tail of the dragon, whichever hangs lower once
+ * the ship is tipped. The dragon reaches further fore and aft than the hull, so
+ * on a hard swing it, and not the keel, is the part nearest the ground.
+ */
+export function lowestHullY(theta: number): number {
+  let lowest = hullLowestY(theta);
+  const c = Math.cos(theta);
+  const s = Math.sin(theta);
+  for (const p of DRAGON_SPHERES) {
+    lowest = Math.min(lowest, PIVOT_Y + p.y * c - p.z * s - p.radius);
+  }
+  return lowest;
+}
+
+/** Farthest horizontal distance the ship reaches from the ride's centre line. */
+export function maxHullHorizontalReach(theta: number): number {
+  let reach = hullReach(theta);
+  const c = Math.cos(theta);
+  const s = Math.sin(theta);
+  for (const p of DRAGON_SPHERES) {
+    reach = Math.max(reach, Math.abs(p.y * s + p.z * c) + p.radius);
+  }
+  return reach;
 }

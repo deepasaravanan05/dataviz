@@ -1,15 +1,26 @@
 "use client";
 
-import { GONDOLA_HEIGHT, GONDOLA_RADIUS, PALETTE, SEATS_PER_GONDOLA } from "./constants";
-import { ridersForGondola } from "./riders";
-import { SeatedEmployee } from "./SeatedEmployee";
+import {
+  GONDOLA_HEIGHT,
+  GONDOLA_RADIUS,
+  PALETTE,
+  SEATS_PER_GONDOLA,
+  SEAT_MOUNT_Y,
+} from "./constants";
+import { SEAT_GREY, SEAT_GREY_DARK, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
+import { RIDE_SEAT_SCALE } from "@/world/scale";
 
 const LAMP_COUNT = 8;
 
 /**
  * A tub gondola matching the reference: a brown timber tub with a gold trim
- * band top and bottom, red accent lamps around the skirt, and three seated
- * employees facing outward.
+ * band top and bottom and red accent lamps around the skirt. Its two seats
+ * stand empty until an employee climbs into one.
+ *
+ * `arm`, `gondola` and `showLabels` are kept in the signature because the arm
+ * addresses its gondolas by them and the ride pages still pass the label
+ * toggle down; nothing inside reads them now that the tub carries no permanent
+ * passengers.
  */
 export function Gondola({
   arm,
@@ -20,7 +31,9 @@ export function Gondola({
   gondola: number;
   showLabels: boolean;
 }) {
-  const riders = ridersForGondola(arm, gondola);
+  void arm;
+  void gondola;
+  void showLabels;
 
   return (
     <group>
@@ -35,9 +48,19 @@ export function Gondola({
         <meshStandardMaterial color={PALETTE.tubDark} roughness={0.85} />
       </mesh>
 
-      {/* Gold trim bands */}
+      {/*
+        Gold trim bands, wrapping the tub.
+
+        THE ROTATION IS NOT OPTIONAL. `TorusGeometry` is built in the XY plane,
+        so a torus with no rotation STANDS UP like a wheel instead of lying flat
+        like a band. These two were unrotated, which put a 1.55u ring on edge
+        through each tub, hanging 1.5u below its floor — far enough that the
+        rings ploughed through the grass at the bottom of the wave, which is
+        what "the cups go into the soil" was. Lying flat, the lowest thing on a
+        gondola is its own floor again.
+      */}
       {[GONDOLA_HEIGHT / 2, -GONDOLA_HEIGHT / 2 + 0.12].map((y, i) => (
-        <mesh key={i} position={[0, y, 0]} castShadow>
+        <mesh key={i} position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
           <torusGeometry args={[GONDOLA_RADIUS * (i === 0 ? 1 : 0.88), 0.09, 8, 20]} />
           <meshStandardMaterial
             color={PALETTE.gold}
@@ -72,17 +95,39 @@ export function Gondola({
         );
       })}
 
-      {/* Seated employees, spread around the tub facing outward */}
-      {riders.map((rider) => {
-        const a = (rider.seat / SEATS_PER_GONDOLA) * Math.PI * 2 - Math.PI / 2;
+      {/*
+        THE TUB'S TWO SEATS, standing empty until an employee climbs in.
+
+        This gondola used to carry permanently-seated figures, and the
+        seats were part of those figures — so removing the passengers took the
+        seating with them. The seats are back, on their own, grey like every
+        other seat in the park and sized for the people who use them.
+      */}
+      {Array.from({ length: SEATS_PER_GONDOLA }, (_, seat) => {
+        const a = (seat / SEATS_PER_GONDOLA) * Math.PI * 2 - Math.PI / 2;
         const r = GONDOLA_RADIUS * 0.44;
         return (
           <group
-            key={rider.seatIndex}
-            position={[Math.cos(a) * r, GONDOLA_HEIGHT * 0.22, Math.sin(a) * r]}
+            key={seat}
+            position={[Math.cos(a) * r, SEAT_MOUNT_Y, Math.sin(a) * r]}
             rotation={[0, -a + Math.PI / 2, 0]}
+            scale={RIDE_SEAT_SCALE}
           >
-            <SeatedEmployee rider={rider} showLabel={showLabels} />
+            {/* Pan */}
+            <mesh position={[0, -0.28, -0.02]} castShadow receiveShadow>
+              <boxGeometry args={[0.62, 0.12, 0.56]} />
+              <meshStandardMaterial color={SEAT_GREY} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
+            </mesh>
+            {/* Back */}
+            <mesh position={[0, 0.02, -0.3]} castShadow>
+              <boxGeometry args={[0.62, 0.6, 0.12]} />
+              <meshStandardMaterial color={SEAT_GREY_DARK} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
+            </mesh>
+            {/* Frame under the pan */}
+            <mesh position={[0, -0.36, -0.02]}>
+              <boxGeometry args={[0.68, 0.06, 0.62]} />
+              <meshStandardMaterial color={PALETTE.seatFrame} roughness={0.8} />
+            </mesh>
           </group>
         );
       })}

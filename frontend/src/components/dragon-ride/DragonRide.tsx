@@ -8,6 +8,7 @@ import { Ship } from "./Ship";
 import { DRAGON_ORIGIN, DRAGON_YAW, PIVOT_Y } from "./constants";
 import { swingAngle } from "./swingKinematics";
 import { validateRiders } from "./riders";
+import { rideAnimationSecondsNow } from "@/simulation/journey/activeRideOps";
 
 /**
  * The Giant Dragon Swing Ship.
@@ -23,18 +24,26 @@ import { validateRiders } from "./riders";
  */
 export function DragonRide({ showLabels = false }: { showLabels?: boolean }) {
   const shipRef = useRef<Group>(null);
-  const elapsed = useRef(0);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") validateRiders();
   }, []);
 
-  useFrame((_, delta) => {
+  /*
+   * The ship swings only while the ride is RUNNING a dispatch, off the ride's
+   * own animation clock rather than an accumulating counter — which also
+   * retires the backgrounded-tab guard, because a simulated clock cannot jump.
+   *
+   * That clock spans a whole number of half swing periods, and the ship's angle
+   * is exactly zero at every one of them, so a stopped ship hangs level at the
+   * bottom of its arc with the deck square to the boarding platform. The swing
+   * itself — its pendulum shape, its amplitude envelope, its geometry — is
+   * untouched.
+   */
+  useFrame(() => {
     const ship = shipRef.current;
     if (!ship) return;
-    // Guard against the large delta a backgrounded tab produces on resume.
-    elapsed.current += Math.min(delta, 0.1);
-    ship.rotation.x = swingAngle(elapsed.current);
+    ship.rotation.x = swingAngle(rideAnimationSecondsNow("dragon"));
   });
 
   return (

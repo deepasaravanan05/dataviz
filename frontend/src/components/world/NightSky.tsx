@@ -3,6 +3,8 @@
 import { Stars } from "@react-three/drei";
 import { useMemo } from "react";
 import * as THREE from "three";
+import { SKY_THEMES } from "./skyThemes";
+import { useSkyThemeStore } from "@/store/skyThemeStore";
 
 /**
  * The night sky.
@@ -53,6 +55,11 @@ const fragmentShader = /* glsl */ `
 `;
 
 export function NightSky() {
+  const theme = useSkyThemeStore((s) => s.theme);
+  const cfg = SKY_THEMES[theme];
+
+  /* Rebuilt per theme rather than mutated, so the dome can never be left
+     holding half of one palette and half of another. */
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -63,13 +70,13 @@ export function NightSky() {
         fog: false,
         toneMapped: false,
         uniforms: {
-          uHorizon: { value: new THREE.Color("#16233d") },
-          uMid: { value: new THREE.Color("#0a1024") },
-          uZenith: { value: new THREE.Color("#03040b") },
-          uGlow: { value: new THREE.Color("#3d4f7a") },
+          uHorizon: { value: new THREE.Color(cfg.dome.horizon) },
+          uMid: { value: new THREE.Color(cfg.dome.mid) },
+          uZenith: { value: new THREE.Color(cfg.dome.zenith) },
+          uGlow: { value: new THREE.Color(cfg.dome.glow) },
         },
       }),
-    [],
+    [cfg],
   );
 
   const geometry = useMemo(() => new THREE.SphereGeometry(DOME_RADIUS, 32, 20), []);
@@ -83,20 +90,23 @@ export function NightSky() {
         and unsaturated — a real night sky over a lit park shows a scattering,
         not a planetarium.
       */}
-      <Stars radius={3200} depth={900} count={2600} factor={26} saturation={0} fade speed={0.35} />
+      {cfg.stars && (
+        <Stars radius={3200} depth={900} count={2600} factor={26} saturation={0} fade speed={0.35} />
+      )}
 
-      {/* The moon: the one warm-cool highlight, and the source the key light matches. */}
-      <group position={[-2100, 1250, -1500]}>
+      {/* The moon at night, the sun at either end of the day — same disc, and
+          always the source the key light is matched to. */}
+      <group position={cfg.orb.position}>
         <mesh>
           <sphereGeometry args={[78, 24, 18]} />
-          <meshBasicMaterial color="#e8f1ff" toneMapped={false} fog={false} />
+          <meshBasicMaterial color={cfg.orb.core} toneMapped={false} fog={false} />
         </mesh>
         <mesh>
           <sphereGeometry args={[190, 20, 14]} />
           <meshBasicMaterial
-            color="#9db6e8"
+            color={cfg.orb.halo}
             transparent
-            opacity={0.16}
+            opacity={cfg.orb.haloOpacity}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
             toneMapped={false}

@@ -3,6 +3,7 @@
 import type { ThreeEvent } from "@react-three/fiber";
 import type { ReactNode } from "react";
 import { useRideSelectionStore } from "@/store/rideSelectionStore";
+import { useFoodCourtStore } from "@/store/foodCourtStore";
 import { PARK_LAYOUT, rideById } from "./layout";
 import type { DepartmentRideId } from "./departments";
 
@@ -24,12 +25,15 @@ export function SelectableRide({
 }) {
   const select = useRideSelectionStore((s) => s.select);
   const setHovered = useRideSelectionStore((s) => s.setHovered);
+  const closeFoodCourt = useFoodCourtStore((s) => s.clear);
 
   return (
     <group
       onClick={(e: ThreeEvent<MouseEvent>) => {
         // Without this the click also counts as a miss on the ride behind.
         e.stopPropagation();
+        // Only one panel is ever open; the food court's gives way to this one.
+        closeFoodCourt();
         select(id);
       }}
       onPointerOver={(e: ThreeEvent<PointerEvent>) => {

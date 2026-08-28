@@ -43,6 +43,17 @@ export const HUMAN = {
  * Furniture and fittings, at the dimensions a person actually meets them.
  * These are ordinary real-world measurements, not artistic choices.
  */
+/**
+ * THE ROAD WIDTH.
+ *
+ * Every carriageway, promenade, ride spur and apron link in the park is laid
+ * at this one figure, so the whole network reads as a single consistent
+ * system rather than a hierarchy of wide and narrow ways. Change it here and
+ * every road, its edge markings, its lamp and bench setback, and the planting
+ * keep-out beside it all follow — nothing downstream carries its own width.
+ */
+export const ROAD_WIDTH = 30.0 * METRE;
+
 export const PROP = {
   tableTopY: 0.74 * METRE,
   tableRadius: 0.42 * METRE,
@@ -69,15 +80,77 @@ export const PROP = {
   doorWidth: 1.0 * METRE,
   storeyHeight: 3.4 * METRE,
 
-  /** Pedestrian ways. */
-  footpathWidth: 4.0 * METRE,
-  promenadeWidth: 18.0 * METRE,
-  roadLaneWidth: 3.5 * METRE,
+  /**
+   * Ways and roads, all at ROAD_WIDTH. The three names are kept because they
+   * say what a stretch IS — a ride spur, the spine, a carriageway — but they
+   * are no longer different sizes.
+   */
+  footpathWidth: ROAD_WIDTH,
+  promenadeWidth: ROAD_WIDTH,
+  /** Half a carriageway: the arrival road and the gate drop-off are both ROAD_WIDTH overall. */
+  roadLaneWidth: ROAD_WIDTH / 2,
 
   /** A turnstile lane at a gate. */
   turnstileLaneWidth: 1.1 * METRE,
   turnstileHeight: 1.05 * METRE,
 };
+
+/**
+ * HOW TALL AN EMPLOYEE IS DRAWN.
+ *
+ * 3.4 units, crown to floor, for every one of the thirty — set by the user as
+ * the middle of a requested 3.2-3.5 band, with a requested 0.8 x 0.6 footprint
+ * to go with it.
+ *
+ * THE FIGURE IS SCALED UNIFORMLY TO REACH IT, never stretched. The rig is built
+ * at the anatomical 1.75 m and multiplied by one number on all three axes, so
+ * what is drawn is a correctly proportioned person at 1.94 times life size
+ * rather than a distorted one. The requested box falls out of that scaling
+ * almost exactly: `EMPLOYEE_TARGET_WIDTH` lands at 0.77 and
+ * `EMPLOYEE_TARGET_DEPTH` at 0.60, both inside the band that was asked for.
+ *
+ * NOW 3.4 METRES, DOWN FROM TWELVE. Twelve was set when the complaint was that
+ * the cast could not be seen at all from the overview; it fixed that by making
+ * everybody nearly seven times life size, which is why an employee met no piece
+ * of the park's furniture at the hip. The distance problem is not solved by
+ * this number at all — it is solved by `figureLegibility.ts`, whose ceiling is
+ * a world height in metres, so a distant employee holds exactly the same number
+ * of pixels at 3.4 as at 12. What shrinking back to 3.4 buys is everything the
+ * near and middle views were paying for: a person who fits a ride seat, a
+ * boarding stair and a café chair instead of towering over all three.
+ *
+ * At 3.4 m an employee is about twice a real person, which is what keeps them
+ * unmistakable next to a 105 m Drop Tower without being absurd beside a 2.1 m
+ * doorway.
+ */
+export const EMPLOYEE_HEIGHT = 3.4 * METRE;
+
+/**
+ * The bounding box the whole cast is drawn at. Height is exact by
+ * construction; the other two are what uniform scaling of a human silhouette
+ * produces, and are measured from the real rig by the verify suite rather than
+ * asserted here.
+ */
+/*
+ * The requested bounding box, as PROPORTIONS of the height rather than as
+ * metres.
+ *
+ * The brief that set these asked for "4.0 x 0.9 x 0.7" — one box, at one
+ * height. Written as bare metres they silently stopped meaning anything the
+ * moment the height moved, which it has now done three times. Held as ratios of
+ * EMPLOYEE_HEIGHT they keep saying what the brief actually said: a figure a
+ * fifth as wide as it is tall, and a sixth as deep.
+ */
+export const EMPLOYEE_TARGET_WIDTH = EMPLOYEE_HEIGHT * (0.9 / 4.0);
+export const EMPLOYEE_TARGET_DEPTH = EMPLOYEE_HEIGHT * (0.7 / 4.0);
+
+/**
+ * The one number every employee is multiplied by, on all three axes.
+ *
+ * Uniform, and identical for all thirty: no employee has a scale of their own,
+ * so none can drift from the rest.
+ */
+export const EMPLOYEE_SCALE = EMPLOYEE_HEIGHT / HUMAN.height;
 
 /**
  * Distances at which an employee stops being a person and becomes a data
@@ -104,3 +177,48 @@ export const SIGN = {
   boardBottom: 2.6 * METRE,
   postRadius: 0.09 * METRE,
 };
+
+/**
+ * HOW MUCH BIGGER THE RIDE SEATS AND THE PARK BENCHES ARE DRAWN.
+ *
+ * The park's seating was modelled at real dimensions — a 0.82 m drop-tower pan,
+ * a 0.92 m dragon cushion, a 0.34 m coaster bucket — for a real 1.75 m person.
+ * The employees are drawn larger than that, so every seat read as child-sized
+ * furniture beside them.
+ *
+ * IT IS THE EMPLOYEE'S OWN SCALE, not a chosen number. A seat is furniture a
+ * person meets, and this project's rule is that anything a person meets derives
+ * from EMPLOYEE_SCALE — the boarding stair's risers, its width and its
+ * handrails already do. The seat does too, so an employee sits ON the seat at
+ * any drawn height.
+ *
+ * The compromise this used to carry is gone. At the old 12 m figure the factor
+ * was 6.86, which made every seat pan wider than the pitch it was set at, so a
+ * ring of sixty seats read as one continuous bench. At 3.4 m it is 1.94, and
+ * each ride's seats now fit inside their own pitch with daylight between
+ * neighbours — helped further by every ride dropping from sixty seats to forty.
+ * `scripts/verify-visibility.ts` measures the remaining clearances.
+ */
+export const RIDE_SEAT_SCALE = EMPLOYEE_SCALE;
+
+/**
+ * HOW MUCH A RIDE SEAT WAS LOWERED, as a fraction of its own height above the
+ * floor of the vehicle carrying it.
+ *
+ * The user asked for every ride's seat to come down "approximately 10-15%" so
+ * that a rider sits INTO the machine rather than perched on top of it, while
+ * the ride's overall height, structure and proportions stay exactly as they
+ * are. 12.5% is the middle of that band.
+ *
+ * It is applied in one place per ride — the height the seat group is mounted at
+ * — and `simulation/journey/rideKinematics.ts` reads the same lowered mount, so
+ * the seat a person is placed in is always the seat that is drawn. Nothing
+ * else about any ride moves: the mast, the rim, the deck, the arms and the
+ * track are all untouched.
+ */
+export const SEAT_LOWER_FRACTION = 0.125;
+
+/** A seat mount that stood `height` above its vehicle floor, lowered. */
+export function loweredSeatMount(height: number): number {
+  return height * (1 - SEAT_LOWER_FRACTION);
+}

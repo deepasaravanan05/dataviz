@@ -133,7 +133,22 @@ function build(): { trees: Planting[]; shrubs: ShrubPlanting[] } {
   const trees: Planting[] = [];
   const shrubs: ShrubPlanting[] = [];
 
-  const TREE_TARGET = 1500;
+  /*
+   * How many trees stand inside the park.
+   *
+   * Down from 1500 to 600. Fifteen hundred was a woodland, and it read as one:
+   * the interior of the park was closer to forest than to landscaping, the
+   * rides were seen through gaps in it, and the paths ran through a thicket.
+   * Six hundred still greens every open stretch and still screens the park's
+   * edges, but leaves the ground and the attractions visible between them,
+   * which is what planting in a theme park is for.
+   *
+   * The woodland OUTSIDE the boundary is deliberately not reduced — see
+   * BOUNDARY_TREES below. That band is the horizon; thinning it would open the
+   * skyline and leave the park ending at a line, which is a different change
+   * from the one asked for.
+   */
+  const TREE_TARGET = 600;
   const SHRUB_TARGET = 2200;
   const MAX_TRIES = 400000;
 

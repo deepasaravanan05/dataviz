@@ -3,9 +3,10 @@
 import { useMemo } from "react";
 import { CatmullRomCurve3, Matrix4, Quaternion, Vector3 } from "three";
 import { RAIL_GAUGE, RAIL_RADIUS, RAIL_Y, TIE_SPACING, TRACK_SAMPLES } from "./constants";
+import { RIDE_PAINT } from "@/world/ridePaint";
 import { TRACK_CURVE, TRACK_LENGTH } from "./trainTrack";
 
-const RAIL_COLOR = "#8a8f96";
+const RAIL_COLOR = RIDE_PAINT.train.mid;
 const TIE_COLOR = "#5c4530";
 
 function offsetCurve(lateral: number): CatmullRomCurve3 {

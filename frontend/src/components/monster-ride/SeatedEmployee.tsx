@@ -3,6 +3,7 @@
 import { Html } from "@react-three/drei";
 import { PALETTE } from "./constants";
 import { SEAT_COLOR_HEX, riderLabelLines, type Rider } from "./riders";
+import { SEAT_GREY, SEAT_GREY_DARK, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
 
 /**
  * A seated employee in a colour-coded seat. The figure reuses the same shirt
@@ -11,18 +12,19 @@ import { SEAT_COLOR_HEX, riderLabelLines, type Rider } from "./riders";
  * green/yellow/red work-start status.
  */
 export function SeatedEmployee({ rider, showLabel }: { rider: Rider; showLabel: boolean }) {
+  /* The seat is grey; the rider's band is still on their label. */
   const statusHex = SEAT_COLOR_HEX[rider.color];
 
   return (
     <group>
-      {/* Seat pan + back, tinted with the employee's status colour */}
+      {/* Seat pan + back, grey like every seat in the park */}
       <mesh position={[0, -0.28, -0.02]} castShadow receiveShadow>
         <boxGeometry args={[0.62, 0.12, 0.56]} />
-        <meshStandardMaterial color={statusHex} roughness={0.55} metalness={0.1} />
+        <meshStandardMaterial color={SEAT_GREY} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
       </mesh>
       <mesh position={[0, 0.02, -0.3]} castShadow>
         <boxGeometry args={[0.62, 0.6, 0.12]} />
-        <meshStandardMaterial color={statusHex} roughness={0.55} metalness={0.1} />
+        <meshStandardMaterial color={SEAT_GREY_DARK} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
       </mesh>
       {/* Seat frame */}
       <mesh position={[0, -0.36, -0.02]}>

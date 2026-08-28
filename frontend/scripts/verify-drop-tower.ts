@@ -67,10 +67,26 @@ validateRiders();
 const dir = join(__dirname, "..", "src", "components", "drop-tower");
 const src = (f: string) => readFileSync(join(dir, f), "utf8");
 
-// ============ 1. Seats: 60, 20/20/20, from the EXISTING ride system ============
-check("60 seats total", TOWER_RIDERS.length === SEAT_COUNT && SEAT_COUNT === 60, `${TOWER_RIDERS.length}`);
+// ============ 1. Seats: 30-40, evenly banded, from the EXISTING ride system ============
+/*
+ * THE CAPACITY RULE IS NOW 30-40 SEATS PER RIDE, 40 PREFERRED, and the three
+ * GREEN / YELLOW / RED counts are an ALLOCATION order rather than a paint job —
+ * every seat in the park is grey. What has to hold is that the ride is inside
+ * the band, that the three allocation pools are even, and that they account for
+ * every seat; the old "60 and 20 apiece" said the same thing at the old count.
+ */
+check(
+  "capacity is in the 30-40 band, at the preferred 40",
+  SEAT_COUNT >= 30 && SEAT_COUNT <= 40,
+  `${SEAT_COUNT} seats`,
+);
+check("every seat has a rider record", TOWER_RIDERS.length === SEAT_COUNT, `${TOWER_RIDERS.length}`);
 for (const color of ["GREEN", "YELLOW", "RED"] as const) {
-  check(`exactly 20 ${color} seats`, countSeatColor(color) === 20, `${countSeatColor(color)}`);
+  check(
+    `the ${color} allocation band is even`,
+    Math.abs(countSeatColor(color) - SEAT_COUNT / 3) <= 1,
+    `${countSeatColor(color)} of ${SEAT_COUNT}`,
+  );
 }
 check(
   "seat ids unique",
@@ -133,7 +149,11 @@ while (seated < 200) {
   seat.occupied = true;
   seated++;
 }
-check("ride cannot exceed 60 passengers", seated === 60, `${seated} seated before findFreeSeat() returned null`);
+check(
+  "the simulation's own ride still fills to its declared capacity and no further",
+  seated === RIDE_CAPACITY,
+  `${seated} seated before findFreeSeat() returned null, against a declared ${RIDE_CAPACITY}`,
+);
 check("dispatch threshold is 5 employees", reference.minStartCount === 5, "1-4 wait, 5 starts");
 check(
   "no private dispatch system",
@@ -144,7 +164,7 @@ check(
 // ============ 3. Seats physically fit around the ring ============
 const arcSpacing = (2 * Math.PI * SEAT_RING_R) / SEAT_COUNT;
 check(
-  "60 seats fit around the ring without touching",
+  `all ${SEAT_COUNT} seats fit around the ring without touching`,
   arcSpacing > SEAT_WIDTH,
   `arc spacing ${arcSpacing.toFixed(3)}u vs seat width ${SEAT_WIDTH}u`,
 );
@@ -377,14 +397,18 @@ check(
 );
 /*
  * The tower sets its own height rather than inheriting PARK_SCALE — that is
- * what lets it stand 105 m without its 11.8 m footprint growing and shoving a
- * neighbour out of place. An earlier brief froze the height at 62 m; this one
- * asks for landmark rides, so the number moved while the principle did not.
+ * what lets it stand 105 m on a footprint small enough not to shove a
+ * neighbour out of place. Two earlier briefs moved numbers here without moving
+ * the principle: the height went from 62 m to 105 m, and the gondola was later
+ * broadened on purpose. So this no longer pins the footprint to a frozen
+ * literal — it asserts what actually matters, that the footprint is set by the
+ * ride's OWN widest part and is nothing like what PARK_SCALE would have made
+ * of it.
  */
 check(
   "the tower sizes itself, and is not scaled with the rest of the park",
-  TOWER_HEIGHT > 100 && Math.abs(trueReach - 11.8) < 1e-9,
-  `mast ${TOWER_HEIGHT}u on an unchanged ${trueReach.toFixed(1)}u footprint, while other rides scale ${S}x`,
+  TOWER_HEIGHT > 100 && trueReach < 11.8 * S,
+  `mast ${TOWER_HEIGHT}u on a self-set ${trueReach.toFixed(1)}u footprint, where PARK_SCALE would have made it ${(11.8 * S).toFixed(1)}u`,
 );
 check(
   "tower is not inside any PARK_SCALE group in the scene",
@@ -441,10 +465,23 @@ check(
   ),
   "the park's existing camera system is untouched",
 );
+/*
+ * The ring used to carry sixty permanently-seated figures, and this check
+ * asserted THEY were descendants of the moving gondola. They are gone — a seat
+ * that always looked occupied made a rider who had walked back down read as
+ * never having got off. The property still matters, so it now applies to the
+ * SEATS, which is what a boarding employee is attached to.
+ */
 check(
-  "riders are descendants of the moving gondola group",
-  /<group ref=\{gondolaRef\}[\s\S]*<Gondola/.test(src("DropTower.tsx")) && /<SeatedRider/.test(src("Gondola.tsx")),
-  "SeatedRider is nested inside the group whose Y is animated",
+  "the seats are descendants of the moving gondola group",
+  /<group ref=\{gondolaRef\}[\s\S]*<Gondola/.test(src("DropTower.tsx")) &&
+    /<SeatShell/.test(src("Gondola.tsx")),
+  "the seat shells are nested inside the group whose Y is animated",
+);
+check(
+  "and the gondola carries no passenger of its own",
+  !/<SeatedRider/.test(src("Gondola.tsx")),
+  "a seat is empty unless an employee off the attendance sheet is in it",
 );
 check(
   "gondola height comes only from the kinematics module",

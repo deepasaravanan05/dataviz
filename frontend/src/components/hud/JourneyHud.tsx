@@ -4,17 +4,17 @@ import { useMemo } from "react";
 import {
   CHECK_IN_BAND_LABEL,
   CHECK_IN_COLOR_HEX,
-  JOURNEY_EMPLOYEES,
   sampleJourney,
   type CheckInColor,
 } from "@/simulation/journey/journey";
 import {
-  AVERAGE_DELAY,
-  DELAY_BY_BAND,
-  DELAY_BY_DEPARTMENT,
-  MAX_GROUP_AVERAGE,
-  WORST_DELAY,
+  averageDelay,
+  delayByBand,
+  delayByDepartment,
+  maxGroupAverage,
+  worstDelay,
 } from "@/simulation/journey/delayStats";
+import { useActiveJourneyStore } from "@/simulation/journey/activeJourney";
 import { formatSimTime } from "@/simulation/clock";
 import { useJourneyStore } from "@/store/journeyStore";
 
@@ -22,23 +22,22 @@ import { useJourneyStore } from "@/store/journeyStore";
  * The simulated clock, the colour key and a live headcount by stage.
  *
  * Re-renders about once a simulated minute, because that is all the store
- * publishes — the walking figures themselves run off the frame clock.
+ * publishes — the walking figures themselves run off the frame clock. Every
+ * count and bar is computed from the ACTIVE roster through the shared
+ * delayStats functions, so the panel follows an upload the moment it lands.
  */
 
 const BANDS: CheckInColor[] = ["GREEN", "YELLOW", "RED"];
 
-const BAND_COUNTS = BANDS.map((band) => ({
-  band,
-  count: JOURNEY_EMPLOYEES.filter((e) => e.color === band).length,
-}));
-
 function DelayBar({
   label,
   average,
+  max,
   color,
 }: {
   label: string;
   average: number;
+  max: number;
   color: string;
 }) {
   return (
@@ -47,7 +46,7 @@ function DelayBar({
       <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
         <span
           className="block h-full rounded-full"
-          style={{ width: `${(average / MAX_GROUP_AVERAGE) * 100}%`, backgroundColor: color }}
+          style={{ width: `${(average / Math.max(max, 1e-6)) * 100}%`, backgroundColor: color }}
         />
       </span>
       <span className="w-10 shrink-0 text-right tabular-nums text-white/70">
@@ -59,6 +58,27 @@ function DelayBar({
 
 export function JourneyHud() {
   const simTime = useJourneyStore((s) => s.simTime);
+  const employees = useActiveJourneyStore((s) => s.employees);
+
+  const bandCounts = useMemo(
+    () =>
+      BANDS.map((band) => ({
+        band,
+        count: employees.filter((e) => e.color === band).length,
+      })),
+    [employees],
+  );
+
+  const delays = useMemo(
+    () => ({
+      average: averageDelay(employees),
+      byBand: delayByBand(employees),
+      byDepartment: delayByDepartment(employees),
+      worst: worstDelay(employees),
+      maxAverage: maxGroupAverage(employees),
+    }),
+    [employees],
+  );
 
   const stages = useMemo(() => {
     let outside = 0;
@@ -67,10 +87,16 @@ export function JourneyHud() {
     let atRide = 0;
     let working = 0;
 
-    for (const e of JOURNEY_EMPLOYEES) {
+    for (const e of employees) {
       const s = sampleJourney(e, simTime);
       if (!s) {
         outside++;
+        continue;
+      }
+      /* Work started is a fact about the clock now, not a place they stand:
+         they spend the rest of the day in their department ride's seat. */
+      if (s.working) {
+        working++;
         continue;
       }
       switch (s.phase) {
@@ -82,18 +108,25 @@ export function JourneyHud() {
         case "IN_FOOD_COURT":
           foodCourt++;
           break;
+        /* Everything that happens at the ride counts as being at it: arriving,
+           waiting for a seat, boarding, riding, and getting off again. */
         case "AT_RIDE":
+        case "WAITING_AT_LADDER":
+        case "WALKING_TO_LADDER":
+        case "CLIMBING_LADDER":
+        case "ON_PLATFORM":
+        case "WALKING_TO_SEAT":
+        case "BOARDING":
+        case "SITTING_ON_RIDE":
+        case "EXITING_RIDE":
           atRide++;
-          break;
-        case "WORKING":
-          working++;
           break;
         default:
           walking++;
       }
     }
     return { outside, walking, foodCourt, atRide, working };
-  }, [simTime]);
+  }, [simTime, employees]);
 
   return (
     <div className="pointer-events-none absolute bottom-32 left-4 sm:bottom-4 w-[min(19rem,calc(100vw-2rem))] rounded-2xl border border-cyan-300/10 bg-[#070b14]/82 px-4 py-3 text-white shadow-2xl shadow-black/50 backdrop-blur-xl">
@@ -105,7 +138,7 @@ export function JourneyHud() {
       </div>
 
       <div className="mt-2.5 space-y-1">
-        {BAND_COUNTS.map(({ band, count }) => (
+        {bandCounts.map(({ band, count }) => (
           <div key={band} className="flex items-center gap-2 text-[11px]">
             <span
               className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -141,34 +174,35 @@ export function JourneyHud() {
             Delay · check-in → work start
           </span>
           <span className="text-[11px] tabular-nums text-white/55">
-            avg {Math.round(AVERAGE_DELAY)}m
+            avg {Math.round(delays.average)}m
           </span>
         </div>
 
         <div className="mt-1.5 space-y-1">
-          {DELAY_BY_BAND.map((d) => (
+          {delays.byBand.map((d) => (
             <DelayBar
               key={d.key}
               label={d.label}
               average={d.average}
+              max={delays.maxAverage}
               color={CHECK_IN_COLOR_HEX[d.key as CheckInColor]}
             />
           ))}
         </div>
 
         <div className="mt-1.5 space-y-1 border-t border-white/[0.07] pt-1.5">
-          {DELAY_BY_DEPARTMENT.map((d) => (
-            <DelayBar key={d.key} label={d.label} average={d.average} color="#7dd3fc" />
+          {delays.byDepartment.map((d) => (
+            <DelayBar key={d.key} label={d.label} average={d.average} max={delays.maxAverage} color="#7dd3fc" />
           ))}
         </div>
 
         <div className="mt-1.5 text-[10px] tabular-nums text-white/40">
-          Longest wait — {WORST_DELAY.name} ({WORST_DELAY.id}) {Math.round(WORST_DELAY.delayMinutes)} min
+          Longest wait — {delays.worst.name} ({delays.worst.id}) {Math.round(delays.worst.delayMinutes)} min
         </div>
       </div>
 
       <div className="mt-2 border-t border-cyan-300/10 pt-2 text-[10px] leading-relaxed text-white/35">
-        {JOURNEY_EMPLOYEES.length} employees. Click anyone for their full journey. Colour = check-in
+        {employees.length} employees. Click anyone for their full journey. Colour = check-in
         window; each ride is a department; the food court is the stop on the way.
       </div>
     </div>

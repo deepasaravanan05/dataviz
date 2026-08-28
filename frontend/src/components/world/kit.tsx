@@ -33,6 +33,14 @@ export const MAT = {
   asphalt: new THREE.MeshStandardMaterial({ color: "#15171d", roughness: 0.62, metalness: 0.12 }),
   paving: new THREE.MeshStandardMaterial({ color: "#2e3138", roughness: 0.66, metalness: 0.08 }),
   paint: new THREE.MeshStandardMaterial({ color: "#b9bec8", roughness: 0.75 }),
+  /* Road edge markings. Faintly emissive so the lines still read once the park
+     is lit only by its own architecture, without glowing like a light source. */
+  roadLine: new THREE.MeshStandardMaterial({
+    color: "#f2f4f8",
+    roughness: 0.8,
+    emissive: "#cdd3dc",
+    emissiveIntensity: 0.22,
+  }),
   steel: new THREE.MeshStandardMaterial({ color: "#5b6675", roughness: 0.38, metalness: 0.7 }),
   steelDark: new THREE.MeshStandardMaterial({ color: "#242a32", roughness: 0.45, metalness: 0.6 }),
   navy: new THREE.MeshStandardMaterial({ color: "#1a2740", roughness: 0.6 }),
@@ -49,10 +57,19 @@ export const MAT = {
   render: new THREE.MeshStandardMaterial({ color: "#4a4438", roughness: 0.9 }),
   roofTile: new THREE.MeshStandardMaterial({ color: "#2e1a14", roughness: 0.88 }),
   canopy: new THREE.MeshStandardMaterial({ color: "#4a525e", roughness: 0.55, side: THREE.DoubleSide }),
-  foliageDeep: new THREE.MeshStandardMaterial({ color: "#13291a", roughness: 0.96 }),
-  foliageMid: new THREE.MeshStandardMaterial({ color: "#1a3622", roughness: 0.96 }),
-  foliageLight: new THREE.MeshStandardMaterial({ color: "#22432a", roughness: 0.96 }),
-  bark: new THREE.MeshStandardMaterial({ color: "#2b211a", roughness: 0.97 }),
+  /*
+   * Leaf colour for the hand-placed planting — the entrance beds, the planters
+   * and the food-court borders. These three used to sit between #13291a and
+   * #22432a, which is a green so dark and so desaturated that it reads as
+   * black shrubbery against dark ground. They now run the same range the
+   * park's own planting does: a deep shade green, a mid park green and a lit
+   * one, so a bed has depth instead of a single silhouette.
+   */
+  foliageDeep: new THREE.MeshStandardMaterial({ color: "#1c4020", roughness: 0.96 }),
+  foliageMid: new THREE.MeshStandardMaterial({ color: "#2a5f2a", roughness: 0.96 }),
+  foliageLight: new THREE.MeshStandardMaterial({ color: "#3d7d34", roughness: 0.96 }),
+  /* Bark, warmed slightly off near-black so a trunk reads as wood. */
+  bark: new THREE.MeshStandardMaterial({ color: "#37281d", roughness: 0.97 }),
   soil: new THREE.MeshStandardMaterial({ color: "#241c15", roughness: 1 }),
   /* Street lighting: emissive, so a few hundred lamps cost nothing. */
   lampGlow: new THREE.MeshBasicMaterial({ color: "#ffdca8", toneMapped: false }),

@@ -4,7 +4,8 @@ import { useFrame } from "@react-three/fiber";
 import { useRef } from "react";
 import * as THREE from "three";
 import { useCameraStore } from "@/store/cameraStore";
-import { EMPLOYEE_BY_ID, sampleJourney } from "@/simulation/journey/journey";
+import { sampleJourney } from "@/simulation/journey/journey";
+import { activeEmployeeById } from "@/simulation/journey/activeJourney";
 import { currentSimTime } from "@/simulation/journey/clock";
 import { HUMAN } from "@/world/scale";
 
@@ -70,7 +71,7 @@ export function CameraDirector() {
     }
 
     if (mode === "follow" && followId) {
-      const employee = EMPLOYEE_BY_ID[followId];
+      const employee = activeEmployeeById(followId);
       if (!employee) {
         useCameraStore.getState().release();
         return;
@@ -81,13 +82,16 @@ export function CameraDirector() {
         return;
       }
 
-      goalLook.current.set(at.x, HUMAN.shoulderY, at.z);
+      /* Follow them up the ride too: `at.y` is zero for every leg walked on the
+         ground and is the seat's height once they are aboard, so the camera
+         keeps its subject in frame instead of watching the ground beneath. */
+      goalLook.current.set(at.x, at.y + HUMAN.shoulderY, at.z);
 
       if (!followSettled) {
         // Ease in behind them once, then leave the camera to the user.
         scratch.current.set(
           at.x - Math.sin(at.facing) * FOLLOW_DISTANCE,
-          FOLLOW_HEIGHT,
+          at.y + FOLLOW_HEIGHT,
           at.z - Math.cos(at.facing) * FOLLOW_DISTANCE,
         );
         state.camera.position.lerp(scratch.current, k);

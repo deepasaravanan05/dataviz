@@ -21,9 +21,14 @@ export interface SeatSpec {
 }
 
 /**
- * 60 seats across 15 cars (4 per car, matching the reference's 2x2 layout).
+ * 40 seats across 10 cars (4 per car, matching the reference's 2x2 layout).
  * The colour cycles Green -> Yellow -> Red across the whole train, so with 4
  * seats per car the pattern shifts car to car and never clumps.
+ *
+ * The colours are an ALLOCATION order, not a paint job: every seat in the park
+ * is grey (see `world/seatColor.ts`), and what a band decides is which seat
+ * `findFreeSeat()` reaches for first. With 40 seats the cycle lands 14 / 13 /
+ * 13 instead of the old 20 / 20 / 20, which is the same rule at the new count.
  */
 export const SEATS: SeatSpec[] = Array.from({ length: SEAT_COUNT }, (_, index) => {
   const car = Math.floor(index / SEATS_PER_CAR);
@@ -45,7 +50,7 @@ export function countSeatColor(color: SeatColor): number {
   return SEATS.filter((s) => s.color === color).length;
 }
 
-/** Dev-time validation of the 60 / 20-20-20 requirement. */
+/** Dev-time validation of the 40-seat requirement. */
 export function validateSeats(): void {
   const green = countSeatColor("GREEN");
   const yellow = countSeatColor("YELLOW");
@@ -55,16 +60,20 @@ export function validateSeats(): void {
     SEATS.length === SEAT_COUNT,
     `Expected exactly ${SEAT_COUNT} coaster seats, found ${SEATS.length}`,
   );
-  console.assert(SEAT_COUNT === 60, `Seat total must be 60, got ${SEAT_COUNT}`);
-  console.assert(green === 20, `Expected 20 green seats, found ${green}`);
-  console.assert(yellow === 20, `Expected 20 yellow seats, found ${yellow}`);
-  console.assert(red === 20, `Expected 20 red seats, found ${red}`);
   console.assert(
-    green + yellow + red === 60,
-    `Seat colours sum to ${green + yellow + red}, expected 60`,
+    SEAT_COUNT >= 30 && SEAT_COUNT <= 40,
+    `Seat total must be 30-40, got ${SEAT_COUNT}`,
   );
   console.assert(
-    CAR_COUNT * SEATS_PER_CAR === 60,
-    `${CAR_COUNT} cars x ${SEATS_PER_CAR} seats != 60`,
+    green + yellow + red === SEAT_COUNT,
+    `Seat colours sum to ${green + yellow + red}, expected ${SEAT_COUNT}`,
+  );
+  console.assert(
+    Math.max(green, yellow, red) - Math.min(green, yellow, red) <= 1,
+    `The three allocation bands are uneven: ${green} / ${yellow} / ${red}`,
+  );
+  console.assert(
+    CAR_COUNT * SEATS_PER_CAR === SEAT_COUNT,
+    `${CAR_COUNT} cars x ${SEATS_PER_CAR} seats != ${SEAT_COUNT}`,
   );
 }

@@ -1,3 +1,6 @@
+import { loweredSeatMount } from "@/world/scale";
+import { RIDE_PAINT } from "@/world/ridePaint";
+
 /**
  * Palette and dimensions for the Park Train.
  *
@@ -12,27 +15,27 @@
  * capacity per the brief.
  */
 export const PALETTE = {
-  boiler: "#4f8f52",
-  boilerDark: "#3a6b3d",
+  boiler: RIDE_PAINT.train.light,
+  boilerDark: RIDE_PAINT.train.dark,
   smokestack: "#2b2b28",
   smokestackTrim: "#d9b45a",
-  chassis: "#c23b3b",
-  chassisDark: "#9c2e2e",
+  chassis: RIDE_PAINT.train.light,
+  chassisDark: RIDE_PAINT.train.dark,
   roof: "#f2ead8",
   rail: "#e8e2d0",
-  post: "#9c2e2e",
+  post: RIDE_PAINT.train.mid,
   seat: "#cfe066",
   wheelTire: "#232323",
-  wheelRim: "#e6e6e6",
-  wheelHub: "#4f8f52",
+  wheelRim: RIDE_PAINT.train.mid,
+  wheelHub: RIDE_PAINT.train.mid,
   driverShirt: "#2f5fbf",
   driverSkin: "#f1c27d",
   driverCap: "#1e3f8a",
   /** Heidi-inspired carriage accents. */
-  carFrame: "#2b2e33",
-  carFrameDark: "#1c1e22",
-  woodPanel: "#8a6238",
-  woodPanelDark: "#6b4a28",
+  carFrame: RIDE_PAINT.train.light,
+  carFrameDark: RIDE_PAINT.train.dark,
+  woodPanel: RIDE_PAINT.train.mid,
+  woodPanelDark: RIDE_PAINT.train.dark,
   trimGold: "#d4a12a",
 } as const;
 
@@ -52,26 +55,60 @@ export const TRACK_RADIUS_Z = 88;
 export const TRACK_SAMPLES = 480;
 
 /** Track gauge / rail geometry — widened again to suit the larger train. */
-export const RAIL_GAUGE = 2.4;
-export const RAIL_RADIUS = 0.1;
-export const RAIL_Y = 0.08;
-export const TIE_SPACING = 2.6;
+/**
+ * HOW BIG THE TRAIN ITSELF IS.
+ *
+ * Everything the train is MADE of is multiplied by this — its gauge, its rails,
+ * its wheels, its engine and its carriages. The loop is not: TRACK_RADIUS and
+ * TRACK_CENTER below are untouched, so the railway runs exactly the line round
+ * the park that it always did, and only the thing running on it grows.
+ *
+ * That separation is the whole point. The train and its track share one group
+ * scale so the train can never leave its rails, so raising THAT would have
+ * dragged the loop outward across the park — and enlarged the riders sitting in
+ * the carriages along with it, since they are drawn in the same space. Scaling
+ * the train's own dimensions instead leaves the loop and the people alone: the
+ * carriages simply get bigger, and their seats and passengers stay the size
+ * they are everywhere else in the park.
+ */
+export const TRAIN_BODY_SCALE = 1.5;
 
 /**
- * Locomotive + 4 open-air passenger cars, 5 seats each (20 total) — a
+ * The car's own dimensions stay in the train's own space, because that is the
+ * space they are DRAWN in — every vehicle is rendered inside one group scaled
+ * by TRAIN_BODY_SCALE, so scaling them here as well would size the train twice.
+ * What does scale here is everything OUTSIDE that group: the rails the train
+ * runs on, and the spacing the kinematics keeps between vehicles.
+ */
+
+export const RAIL_GAUGE = 2.4 * TRAIN_BODY_SCALE;
+export const RAIL_RADIUS = 0.1 * TRAIN_BODY_SCALE;
+export const RAIL_Y = 0.08 * TRAIN_BODY_SCALE;
+export const TIE_SPACING = 2.6 * TRAIN_BODY_SCALE;
+
+/**
+ * Locomotive + 4 open-air passenger cars, 10 seats each (40 total) — a
  * compact, unmistakably train-shaped consist (a real engine up front
- * pulling a short line of open cars) rather than a long flatbed chain, per
- * the requested realistic open-view 20-seat amusement-park train. Each
- * car is a single across-the-width bench row so every rider is visible
- * from outside on both sides, not just from above.
+ * pulling a short line of open cars) rather than a long flatbed chain. Each
+ * car is open on both sides so every rider is visible from outside, not just
+ * from above.
+ *
+ * FORTY, UP FROM TWENTY, to meet the user's 30-40 capacity for every ride in
+ * the park. The train reaches it WITHOUT growing: the consist is still four
+ * cars behind one engine, each car is still CAR_WIDTH by CAR_LENGTH, and the
+ * loop, the gauge and the speed are untouched. What changed is inside the car —
+ * it now has two bench rows of five instead of one, facing the same way, which
+ * is what a real open-air park train carries anyway.
  */
 export const CARRIAGE_COUNT = 4;
-export const SEATS_PER_CARRIAGE = 5;
+export const SEAT_ROWS_PER_CARRIAGE = 2;
+export const SEATS_PER_ROW = 5;
+export const SEATS_PER_CARRIAGE = SEAT_ROWS_PER_CARRIAGE * SEATS_PER_ROW;
 export const RIDER_COUNT = CARRIAGE_COUNT * SEATS_PER_CARRIAGE;
 
 export const CAR_WIDTH = 3.6;
 export const CAR_LENGTH = 2.8;
-export const CAR_SPACING = 4.2;
+export const CAR_SPACING = 4.2 * TRAIN_BODY_SCALE;
 export const TRAIN_SPEED_UNITS_PER_SEC = 7;
 
 /**
@@ -85,3 +122,14 @@ export const WHEEL_RADIUS = 0.65;
 
 /** Low guard-rail height on the open passenger compartments (§3, §5). */
 export const CAR_RAIL_HEIGHT = 0.55;
+
+/* ---------------- Seat height ---------------- */
+/**
+ * The bench's rise above the carriage floor, after the seat lowering.
+ *
+ * The user asked for every ride's seat to come down 10-15%; on the train the
+ * seat's whole world is the 0.09 m it stands proud of the deck, so the drop is
+ * small in absolute terms and is applied for consistency rather than for
+ * drama — nothing about the car, its rails, its wheels or the track moves.
+ */
+export const BENCH_RISE = loweredSeatMount(0.09);

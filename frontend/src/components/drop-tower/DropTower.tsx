@@ -16,6 +16,7 @@ import {
 } from "./constants";
 import { gondolaY, restraintLock, structuralShake } from "./dropKinematics";
 import { validateRiders } from "./riders";
+import { rideAnimationSecondsNow } from "@/simulation/journey/activeRideOps";
 
 /**
  * The Giant Drop Tower.
@@ -38,16 +39,21 @@ export function DropTower({ showLabels = false }: { showLabels?: boolean }) {
   const restraintsRef = useRef<Group>(null);
   const cableLeft = useRef<Mesh>(null);
   const cableRight = useRef<Mesh>(null);
-  const elapsed = useRef(0);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") validateRiders();
   }, []);
 
-  useFrame((_, delta) => {
-    // Guard against the large delta a backgrounded tab produces on resume.
-    elapsed.current += Math.min(delta, 0.1);
-    const t = elapsed.current;
+  /*
+   * The whole machine cycle now runs off the ride's own animation clock rather
+   * than an accumulating counter — which also retires the backgrounded-tab
+   * guard, because a simulated clock cannot jump. Between dispatches that clock
+   * reads zero, and zero is the start of the dwell phase: the car sitting on
+   * its station with the restraints open, which is exactly the state a group
+   * boards in. The profile itself, its heights and its timings are untouched.
+   */
+  useFrame(() => {
+    const t = rideAnimationSecondsNow("tower");
 
     const y = gondolaY(t);
     const shake = structuralShake(t);

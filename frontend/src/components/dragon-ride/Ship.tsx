@@ -5,18 +5,23 @@ import {
   HULL_WIDTH,
   PALETTE,
   ROW_SPACING,
+  DECK_Y,
   SEATS_PER_ROW,
+  SEAT_MOUNT_Y,
   SEAT_ROWS,
   SEAT_SPACING,
 } from "./constants";
 import { BULWARK_GEOMETRY, BULWARK_INSET_X, HULL_GEOMETRY, KEEL_BAND_GEOMETRY } from "./hullGeometry";
 import { DragonHead } from "./DragonHead";
-import { SeatedRider } from "./SeatedRider";
-import { DRAGON_RIDERS, SEAT_COLOR_HEX } from "./riders";
+import { DragonTail } from "./DragonTail";
+import { NECK_MOUNT, TAIL_MOUNT } from "./dragonProfile";
+import { DRAGON_RIDERS } from "./riders";
+import { SEAT_GREY, SEAT_GREY_DARK, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
+import { RIDE_SEAT_SCALE } from "@/world/scale";
 import { strut, type Strut } from "./strut";
 
 /**
- * The swinging ship: carrier arms, timber hull, open deck, sixty seats and the
+ * The swinging ship: carrier arms, timber hull, open deck, forty seats and the
  * dragon.
  *
  * The component's origin IS the swing pivot, so the parent only has to set
@@ -59,9 +64,9 @@ const ARM_BRACES: Strut[] = (() => {
 const SEAT_X = Array.from({ length: SEATS_PER_ROW }, (_, c) => (c - (SEATS_PER_ROW - 1) / 2) * SEAT_SPACING);
 const SEAT_Z = Array.from({ length: SEAT_ROWS }, (_, r) => (r - (SEAT_ROWS - 1) / 2) * ROW_SPACING);
 
-const DECK_Y = 0.12;
 
-function Seat({ color }: { color: string }) {
+/** One seat. Grey, like every seat in the park — see world/seatColor.ts. */
+function Seat() {
   return (
     <group>
       {/* Pedestal */}
@@ -69,15 +74,15 @@ function Seat({ color }: { color: string }) {
         <boxGeometry args={[0.42, 0.36, 0.42]} />
         <meshStandardMaterial color={PALETTE.seatFrame} roughness={0.65} metalness={0.15} />
       </mesh>
-      {/* Cushion, carrying the employee's status colour */}
+      {/* Cushion */}
       <mesh position={[0, 0.42, 0]} castShadow receiveShadow>
         <boxGeometry args={[0.92, 0.18, 0.82]} />
-        <meshStandardMaterial color={color} roughness={0.55} metalness={0.05} />
+        <meshStandardMaterial color={SEAT_GREY} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
       </mesh>
       {/* Backrest, tipped back slightly */}
       <mesh position={[0, 0.85, -0.42]} rotation={[-0.16, 0, 0]} castShadow>
         <boxGeometry args={[0.92, 0.8, 0.16]} />
-        <meshStandardMaterial color={color} roughness={0.55} metalness={0.05} />
+        <meshStandardMaterial color={SEAT_GREY_DARK} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
       </mesh>
       {/* Head cushion */}
       <mesh position={[0, 1.3, -0.5]} rotation={[-0.16, 0, 0]} castShadow>
@@ -88,7 +93,7 @@ function Seat({ color }: { color: string }) {
   );
 }
 
-/** One lap-bar restraint spanning a whole row of six seats. */
+/** One lap-bar restraint spanning a whole row of four seats. */
 function RestraintBar() {
   const span = SEAT_X[SEATS_PER_ROW - 1] - SEAT_X[0] + 0.9;
   return (
@@ -108,6 +113,9 @@ function RestraintBar() {
 }
 
 export function Ship({ showLabels }: { showLabels: boolean }) {
+  /* Kept so the ride pages' label toggle still type-checks; the deck no longer
+     carries permanent passengers for it to label. */
+  void showLabels;
   return (
     <group>
       {/* ---------- Carrier arms + axle bearing ---------- */}
@@ -187,12 +195,21 @@ export function Ship({ showLabels }: { showLabels: boolean }) {
           </mesh>
         ))}
 
-        {/* ---------- Seats + riders ---------- */}
+        {/*
+          ---------- Seats ----------
+
+          Empty until a real employee climbs into one. The deck used to carry
+          permanently-seated figures, which made every seat look occupied
+          whether anybody was in it or not — so a rider who had walked back down
+          the stair left a figure sitting exactly where they had been. The seats
+          themselves, their grey, their spacing and their restraints are
+          untouched.
+        */}
         {DRAGON_RIDERS.map((rider) => (
-          <group key={rider.seatId} position={[SEAT_X[rider.col], DECK_Y, SEAT_Z[rider.row]]}>
-            <Seat color={SEAT_COLOR_HEX[rider.seatColor]} />
-            <group position={[0, 0.62, 0.02]}>
-              <SeatedRider rider={rider} showLabel={showLabels} />
+          <group key={rider.seatId} position={[SEAT_X[rider.col], SEAT_MOUNT_Y, SEAT_Z[rider.row]]}>
+            {/* Sized for the people who sit in it — see RIDE_SEAT_SCALE. */}
+            <group scale={RIDE_SEAT_SCALE}>
+              <Seat />
             </group>
           </group>
         ))}
@@ -205,31 +222,13 @@ export function Ship({ showLabels }: { showLabels: boolean }) {
         ))}
 
         {/* ---------- Dragon at the bow ---------- */}
-        <group position={[0, 1.1, 12.2]}>
+        <group position={NECK_MOUNT}>
           <DragonHead />
         </group>
 
-        {/* ---------- Stern: a curled gold tail answering the dragon ---------- */}
-        <group position={[0, 1.0, -12.6]}>
-          {Array.from({ length: 7 }, (_, i) => {
-            const t = i / 6;
-            const angle = t * 2.1;
-            return (
-              <mesh
-                key={i}
-                position={[0, 0.6 + Math.sin(angle) * 2.4, -0.4 - (1 - Math.cos(angle)) * 1.9]}
-                rotation={[angle, 0, 0]}
-                castShadow
-              >
-                <cylinderGeometry args={[0.5 - t * 0.34, 0.62 - t * 0.36, 0.8, 10]} />
-                <meshStandardMaterial
-                  color={i % 2 === 0 ? PALETTE.trimGold : PALETTE.dragonBodyDark}
-                  roughness={0.4}
-                  metalness={0.45}
-                />
-              </mesh>
-            );
-          })}
+        {/* ---------- Dragon's tail at the stern ---------- */}
+        <group position={TAIL_MOUNT}>
+          <DragonTail />
         </group>
       </group>
     </group>

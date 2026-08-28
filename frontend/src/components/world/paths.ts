@@ -21,8 +21,9 @@ import { PROP } from "@/world/scale";
  * crowd instead of beside it, and why a path can never be laid somewhere
  * nobody goes — or, worse, somebody left walking across bare grass.
  *
- * Widths are real. A promenade carrying an entire workforce is twelve metres;
- * a spur to one attraction is four.
+ * Every way is laid at PROP road width. The spine, the ride spurs and the
+ * boarding aprons are all the same size, so the network reads as one road
+ * system rather than a hierarchy of wide and narrow stretches.
  */
 
 export interface PathLink {
@@ -90,10 +91,16 @@ function node(at: [number, number], radius: number) {
  * walk in along it, so it is walkable ground even though its surface is drawn
  * with the approach road rather than by the paving layer.
  */
-link([GATE_X, GATE_Z], [GATE_X, SPAWN_Z + 130], PROP.roadLaneWidth * 2 + 5 + PROP.footpathWidth * 2 + 8, false, "road");
+link(
+  [GATE_X, GATE_Z],
+  [GATE_X, SPAWN_Z + 130],
+  PROP.roadLaneWidth * 2 + PROP.footpathWidth * 2 + 8,
+  false,
+  "road",
+);
 
 // The spine: out of the gate and down into the park.
-link([GATE_X, GATE_Z], GATE_INNER, PROP.promenadeWidth + 4, true);
+link([GATE_X, GATE_Z], GATE_INNER, PROP.promenadeWidth, true);
 link(GATE_INNER, PLAZA, PROP.promenadeWidth, true);
 node(GATE_INNER, PROP.promenadeWidth * 0.75);
 /*
@@ -104,8 +111,19 @@ node(GATE_INNER, PROP.promenadeWidth * 0.75);
 node(PLAZA, PLAZA_RADIUS);
 
 // The food court spur, and its link on toward the rides.
-link(GATE_INNER, FOOD_COURT_DOOR, PROP.footpathWidth + 2, true);
+link(GATE_INNER, FOOD_COURT_DOOR, PROP.footpathWidth, true);
 node(FOOD_COURT_DOOR, PROP.footpathWidth);
+
+/**
+ * Open ground kept between any paving and a ride's own footprint.
+ *
+ * A ride whose apron runs right up to it — or under it — reads as sitting ON
+ * the paving rather than standing in the park, and the parts that swing out
+ * over the edge appear to pass through the ground. Six units is two employee
+ * heights of clear grass, enough to see daylight between the two surfaces from
+ * the main camera.
+ */
+const APRON_RIDE_CLEARANCE = 6;
 
 /*
  * A spur to every attraction, from both the gate and the food court — the two
@@ -118,15 +136,31 @@ for (const d of RIDE_DEPARTMENTS) {
 
   link(GATE_INNER, approach, PROP.footpathWidth, false);
   link(FOOD_COURT_DOOR, approach, PROP.footpathWidth, false);
-  link(approach, stand, PROP.footpathWidth + 2, false);
+  link(approach, stand, PROP.footpathWidth, false);
 
   node(approach, PROP.footpathWidth * 0.9);
   /*
-   * The apron has to hold a whole department's arrival fan with room to spare.
-   * Sized from the widest fan any department actually produces, so it cannot
-   * fall short when a department grows.
+   * THE WAITING APRON, AND WHY IT IS NOT AS BIG AS IT WOULD LIKE TO BE.
+   *
+   * The apron wants to hold a whole department's arrival fan, so it was sized
+   * from the widest fan any department actually produces. Taken on its own that
+   * is right, and it produced an apron that reached 24.6u INSIDE the Monster
+   * Ride's swept footprint: the paving ran out under the ride and the cups
+   * passed straight through it, which is exactly the surface-overlap that had
+   * to go. The coaster's apron did the same, 23.4u in.
+   *
+   * So the fan size is now a wish, and the ride has the veto. The apron is
+   * trimmed until its outer edge stops APRON_RIDE_CLEARANCE clear of the ride's
+   * own footprint, leaving a band of open grass all the way round every ride —
+   * ground, then clear separation, then the ride. Nothing is hidden and nothing
+   * moves: the apron is still centred on the same waiting point, still paved in
+   * the same material, and simply stops before it reaches the machinery.
    */
-  node(stand, Math.max(16, widestFanRadius() + 6, Math.min(ride.halfX, ride.halfZ) * 0.6));
+  const reach = Math.max(ride.halfX, ride.halfZ);
+  const toStand = Math.hypot(stand[0] - ride.center[0], stand[1] - ride.center[1]);
+  const wanted = Math.max(16, widestFanRadius() + 6, Math.min(ride.halfX, ride.halfZ) * 0.6);
+  const room = toStand - reach - APRON_RIDE_CLEARANCE;
+  node(stand, Math.min(wanted, room));
 }
 
 export const PATH_LINKS: PathLink[] = links;

@@ -5,7 +5,12 @@ import { useEffect, useRef } from "react";
 import type { Group } from "three";
 import { Locomotive } from "./Locomotive";
 import { Carriage } from "./Carriage";
-import { CARRIAGE_COUNT, CAR_SPACING, TRAIN_SPEED_UNITS_PER_SEC } from "./constants";
+import {
+  CARRIAGE_COUNT,
+  CAR_SPACING,
+  TRAIN_BODY_SCALE,
+  TRAIN_SPEED_UNITS_PER_SEC,
+} from "./constants";
 import { TRACK_LENGTH } from "./trainTrack";
 import { carTransform, createCarTransform } from "./trainKinematics";
 import { validateRiders } from "./riders";
@@ -51,11 +56,21 @@ export function ParkTrain({ showLabels = false }: { showLabels?: boolean }) {
 
   return (
     <group ref={groupRef}>
-      <group>
+      {/*
+        EVERY VEHICLE IS DRAWN AT TRAIN_BODY_SCALE.
+
+        The scale goes on each vehicle, not on the train as a whole, because the
+        frame loop above places these children ON the track — scaling their
+        parent would scale the positions it writes and lift the train off its
+        rails. Scaling each one about its own origin makes the engine and the
+        carriages bigger while every one of them stays exactly on the curve.
+        The loop writes position and quaternion only, so the scale survives.
+      */}
+      <group scale={TRAIN_BODY_SCALE}>
         <Locomotive />
       </group>
       {Array.from({ length: CARRIAGE_COUNT }, (_, i) => (
-        <group key={i}>
+        <group key={i} scale={TRAIN_BODY_SCALE}>
           <Carriage index={i} showLabels={showLabels} />
         </group>
       ))}

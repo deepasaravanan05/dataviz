@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PARK_LAYOUT } from "../src/components/park/layout";
+import { PATH_NODES } from "../src/components/world/paths";
 import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
 import { TRAIN_SCALE } from "../src/components/park/parkScale";
+import { SKY_THEMES } from "../src/components/world/skyThemes";
+import { GRASS_TILE_METRES } from "../src/components/world/grassTexture";
 import {
   FOOD_COURT_CENTER,
   FOOD_COURT_HALF,
@@ -20,8 +23,8 @@ function check(label: string, ok: boolean, detail: string) {
 
 const root = join(__dirname, "..");
 const scene = readFileSync(join(root, "src", "components", "roller-coaster", "ParkScene.tsx"), "utf8");
-const sim = readFileSync(join(root, "src", "components", "3d", "Scene.tsx"), "utf8");
 const ground = readFileSync(join(root, "src", "components", "ferris-wheel", "ParkGround.tsx"), "utf8");
+const grassSrc = readFileSync(join(root, "src", "components", "world", "grassTexture.ts"), "utf8");
 
 /** Comments describe what was removed, so checks must read code only. */
 function code(src: string): string {
@@ -37,19 +40,23 @@ function num(src: string, re: RegExp, label: string): number {
 const GROUND_SIZE = num(scene, /size=\{(\d+)\}/, "ground size");
 const GROUND_HALF = GROUND_SIZE / 2;
 /*
- * The night pass recoloured the atmosphere, so the fog is read by shape, not
- * by a hard-coded daytime colour: whatever hex the scene declares is taken as
- * the fog colour and compared against the background further down.
+ * The atmosphere is now per time-of-day, so the fog is read from the theme
+ * table the scene renders from rather than from a literal in the JSX. The
+ * geometry checks below are about the darkest, haziest setting, which is the
+ * `dark` entry — the night the park was originally tuned under.
  */
-const FOG_MATCH = code(scene).match(/<fog[\s\S]{0,200}?args=\{\["(#[0-9a-fA-F]{6})", (\d+), (\d+)\]\}/);
-if (!FOG_MATCH) throw new Error("Could not read the scene fog declaration");
-const FOG_COLOR = FOG_MATCH[1].toLowerCase();
-const FOG_NEAR = Number(FOG_MATCH[2]);
-const FOG_FAR = Number(FOG_MATCH[3]);
+const NIGHT = SKY_THEMES.dark;
+check(
+  "the scene takes its atmosphere from the shared theme table",
+  /SKY_THEMES\[/.test(code(scene)) && /sky\.fog\.color/.test(code(scene)),
+  "one source of truth for fog, background, lights and exposure",
+);
+const FOG_NEAR = NIGHT.fog.near;
+const FOG_FAR = NIGHT.fog.far;
 const MAX_DISTANCE = num(scene, /maxDistance=\{(\d+)\}/, "maxDistance");
 const MIN_DISTANCE = num(scene, /minDistance=\{(\d+)\}/, "minDistance");
 const CAM_FAR = num(scene, /far: (\d+)/, "camera far");
-const FOV = num(scene, /fov: (\d+)/, "fov");
+const FOV = num(scene, /DEFAULT_FOV = (\d+)/, "fov");
 
 // ============ 1. Everything in the park sits on the ground ============
 const xs: number[] = [];
@@ -126,17 +133,21 @@ check(
  * visible colour step, and there is none to be had inside this tolerance.
  */
 {
-  const bg = scene.match(/<color attach="background" args=\{\["(#[0-9a-fA-F]{6})"\]\}/);
+  /* Every theme must hold the horizon, not just the night one. */
   const channel = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
-  const near = bg
-    ? Math.max(
-        ...[0, 1, 2].map((i) => Math.abs(channel(bg[1].toLowerCase(), i) - channel(FOG_COLOR, i))),
-      )
-    : Infinity;
+  const worst = Object.entries(SKY_THEMES).map(([name, t]) => {
+    const gap = Math.max(
+      ...[0, 1, 2].map((i) =>
+        Math.abs(channel(t.background.toLowerCase(), i) - channel(t.fog.color.toLowerCase(), i)),
+      ),
+    );
+    return { name, gap, bg: t.background, fog: t.fog.color };
+  });
+  const offender = worst.reduce((a, b) => (b.gap > a.gap ? b : a));
   check(
     "fog and background are near-identical colours, so land fades into sky",
-    near <= 24,
-    bg ? `background ${bg[1]} vs fog ${FOG_COLOR}, worst channel gap ${near}` : "no background colour found",
+    offender.gap <= 24,
+    `worst theme "${offender.name}": background ${offender.bg} vs fog ${offender.fog}, gap ${offender.gap}`,
   );
 }
 check(
@@ -241,13 +252,95 @@ check(
   "one plane: the grass",
 );
 
-// Ride placement must be byte-for-byte what it was before this change.
+// ============ 5c. The grass is grass ============
+/*
+ * The plane used to be painted one flat colour, which is the one thing a lawn
+ * never is. It now carries a generated surface — blade grain, tuft clumping
+ * and the matching relief — and a green albedo in every theme. Both halves are
+ * asserted here: a colour without the surface is painted card, and a surface
+ * under a brown albedo is not a lawn.
+ */
+check(
+  "the ground is a generated grass surface, not a flat fill",
+  /grassMapsFor/.test(code(ground)) &&
+    /map=\{/.test(code(ground)) &&
+    /normalMap=\{/.test(code(ground)),
+  "the plane takes a colour map and a matching normal map from world/grassTexture",
+);
+check(
+  "the lawn's relief is generated rather than loaded",
+  !/useLoader|TextureLoader|\.jpg|\.png|https?:/.test(code(grassSrc)) &&
+    /DataTexture/.test(code(grassSrc)),
+  "value noise straight into a DataTexture — no image file, no network, no loader",
+);
+check(
+  "the tile wraps, so 14 km of ground has no seam",
+  /RepeatWrapping/.test(grassSrc) && /wrap\(/.test(grassSrc),
+  `one tile covers ${GRASS_TILE_METRES} m and repeats ${Math.round(GROUND_SIZE / GRASS_TILE_METRES)}x across the plane`,
+);
+const brownThemes = (["sunset", "sunrise", "dark"] as const).filter((id) => {
+  const hex = SKY_THEMES[id].ground.grass;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return !(g > r * 1.3 && g > b * 1.3);
+});
+check(
+  "every theme's ground is green",
+  brownThemes.length === 0,
+  (["sunset", "sunrise", "dark"] as const)
+    .map((id) => `${SKY_THEMES[id].label} ${SKY_THEMES[id].ground.grass}`)
+    .join(", ") + " — green dominant in all three, where all three used to be olive-brown",
+);
+
+/*
+ * Ride placement, as it now stands.
+ *
+ * Three of these are the centres the park has always had. Two changed, and both
+ * changes were asked for or forced by one that was:
+ *
+ *   - the Monster Ride and the Drop Tower each STEPPED BACK 40 m, away from the
+ *     main gate at z = 620 and deeper into the park;
+ *   - the Roller Coaster moved 12.3 m west, which nobody asked for. Every ride
+ *     grew 20%, and at full size the Roller Coaster and the Monster Ride
+ *     overlap by 12.5 m in x. The layout solver will not let two rides
+ *     intersect, so it pushed the pair apart symmetrically. The alternative was
+ *     to hand-place one of them into the other, which is worse.
+ */
+/*
+ * NO PAVED SURFACE MAY REACH UNDER A RIDE.
+ *
+ * The waiting aprons are sized from the crowd that gathers on them, and left to
+ * themselves two of them grew until they ran 24u INSIDE the ride they served —
+ * the Monster Ride's cups swung out over paving and appeared to pass through
+ * the ground. Every paved disc is therefore swept against every ride's
+ * footprint here, so a future change to a crowd size, a ride's reach or a
+ * walking route cannot quietly put the ground back under the machinery.
+ */
+{
+  let worstGap = Infinity;
+  let worstPair = "";
+  for (const n of PATH_NODES) {
+    for (const r of PARK_LAYOUT) {
+      const reach = Math.max(r.halfX, r.halfZ);
+      const gap = Math.hypot(n.at[0] - r.center[0], n.at[1] - r.center[1]) - n.radius - reach;
+      if (gap < worstGap) {
+        worstGap = gap;
+        worstPair = `${r.label} vs the apron at (${n.at.map((v) => v.toFixed(0)).join(", ")})`;
+      }
+    }
+  }
+  check(
+    "no paved apron reaches under a ride — every ride stands on open grass",
+    worstGap > 0,
+    `tightest is ${worstPair}: ${worstGap.toFixed(1)}u of clear ground between the paving and the ride`,
+  );
+}
+
 const EXPECTED_CENTRES: Record<string, [number, number]> = {
   ferris: [-165, 250],
   dragon: [-72.3, 117.7],
-  coaster: [70, -10],
-  monster: [205, 90],
-  tower: [267.75, 280],
+  coaster: [57.7196817359987, -10],
+  monster: [217.2803182640013, 50],
+  tower: [267.75, 240],
 };
 check(
   "every ride is exactly where it was",
@@ -258,26 +351,12 @@ check(
   PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
 );
 
-// ============ 6. The simulation scene had the same problem ============
-const SIM_SIZE = num(sim, /planeGeometry args=\{\[(\d+), \d+\]\}/, "sim ground");
-const SIM_FOG_FAR = num(sim, /args=\{\["#bcd6f2", \d+, (\d+)\]\}/, "sim fog far");
-const SIM_MAX = num(sim, /maxDistance=\{(\d+)\}/, "sim maxDistance");
-
-check(
-  "the simulation scene's ground was enlarged too",
-  SIM_SIZE >= 1000,
-  `${SIM_SIZE}u across (was 70x40)`,
-);
-check(
-  "the simulation scene no longer sits in a white void",
-  /<color attach="background"/.test(sim) && /<fog attach="fog"/.test(sim),
-  "sky-coloured surround and matching fog added",
-);
-check(
-  "its ground edge is out of view as well",
-  SIM_SIZE / 2 - SIM_MAX > SIM_FOG_FAR,
-  `nearest edge ${SIM_SIZE / 2 - SIM_MAX}u vs fog end ${SIM_FOG_FAR}u`,
-);
+/*
+ * Section 6 used to re-check the Phase-1 proof-of-concept scene
+ * (src/components/3d/). That scene has been removed — the journey layer in
+ * ParkScene is the employee simulation now — so the park scene above is the
+ * only scene there is.
+ */
 
 // ============ Summary ============
 console.log(

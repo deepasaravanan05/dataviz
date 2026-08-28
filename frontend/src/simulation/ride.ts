@@ -1,25 +1,45 @@
 import type { Ride, Seat, SeatColor } from "@/types/simulation";
 
 const SEAT_COLORS: SeatColor[] = ["GREEN", "YELLOW", "RED"];
-const SEATS_PER_COLOR = 20;
+
+/**
+ * HOW MANY SEATS A RIDE HAS.
+ *
+ * FORTY, DOWN FROM SIXTY. Every ride in the park was asked for a realistic
+ * capacity between thirty and forty, with forty preferred, and each one now
+ * carries exactly that many physical seats — forty cabins on the Ferris Wheel,
+ * ten coaster cars of four, forty around the Drop Tower's ring, ten rows of
+ * four on the Dragon's deck, twenty Monster tubs of two, and four train cars of
+ * ten. This is the simulation's own declaration of the same number, so what the
+ * ride pages print as "capacity" is the seating that is actually there.
+ *
+ * The three bands divide it as evenly as forty divides by three: 14 / 13 / 13.
+ * They are an ALLOCATION order and not a paint job — every seat in the park is
+ * grey (see `world/seatColor.ts`) — so `findFreeSeat()` still hands out a
+ * matching seat first and falls back exactly as it always has; there is simply
+ * one fewer of each to hand out.
+ */
+export const SEAT_COUNT = 40;
 
 export function createRide(): Ride {
   const seats: Seat[] = [];
-  for (const color of SEAT_COLORS) {
-    for (let i = 0; i < SEATS_PER_COLOR; i++) {
-      seats.push({
-        id: `${color}-${i + 1}`,
-        color,
-        occupied: false,
-        employeeId: null,
-      });
-    }
+  /* Dealt round-robin so the bands come out 14 / 13 / 13 rather than
+     20 / 20 / 0 — the count no longer divides by three. */
+  const taken: Record<SeatColor, number> = { GREEN: 0, YELLOW: 0, RED: 0 };
+  for (let i = 0; i < SEAT_COUNT; i++) {
+    const color = SEAT_COLORS[i % SEAT_COLORS.length];
+    seats.push({
+      id: `${color}-${++taken[color]}`,
+      color,
+      occupied: false,
+      employeeId: null,
+    });
   }
   return {
     id: "RIDE-OPERATIONS-01",
     name: "Pirate Ship",
     department: "Operations",
-    capacity: 60,
+    capacity: SEAT_COUNT,
     minStartCount: 5,
     maxWaitMinutes: 18,
     runDurationMinutes: 4,

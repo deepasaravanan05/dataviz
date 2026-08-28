@@ -5,19 +5,10 @@ import { useEffect, useRef } from "react";
 import type { Group } from "three";
 import { Arm } from "./Arm";
 import { CentralTower } from "./CentralTower";
-import {
-  ARM_ATTACH_HEIGHT,
-  ARM_COUNT,
-  ARM_LENGTH,
-  BASE_HEIGHT,
-  HUB_SPIN,
-  MONSTER_ORIGIN,
-  UNDULATION_CENTER_TILT,
-  UNDULATION_RATE,
-  UNDULATION_SWING,
-} from "./constants";
-import { clampTiltForGroundClearance } from "./groundClearance";
+import { ARM_ATTACH_HEIGHT, ARM_COUNT, BASE_HEIGHT, HUB_SPIN, MONSTER_ORIGIN } from "./constants";
 import { validateRiders } from "./riders";
+import { rideAnimationSecondsNow } from "@/simulation/journey/activeRideOps";
+import { monsterArmTilt } from "@/simulation/journey/rideKinematics";
 
 /** Mutable holder for an arm's current tilt, shared with that arm each frame. */
 export interface TiltHandle {
@@ -58,35 +49,32 @@ export function MonsterRide({ showLabels = false }: { showLabels?: boolean }) {
   // the actual writes below go through the five named refs directly.
   const tiltRefs: TiltHandle[] = [tilt0, tilt1, tilt2, tilt3, tilt4];
 
-  const elapsed = useRef(0);
+  const root = useRef<Group>(null);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") validateRiders();
   }, []);
 
-  useFrame((_, delta) => {
-    elapsed.current += delta;
+  /*
+   * All three motions now run off the ride's own animation clock instead of
+   * accumulating from the render clock, so the machine stands still between
+   * dispatches and turns only while it is RUNNING one — and, because that
+   * clock spans a whole number of rest-to-rest loops, it comes back to the
+   * exact pose it left, with its gondolas at the boarding platform.
+   *
+   * The wave itself is unchanged in shape, centre, swing and phase offset;
+   * `monsterArmTilt` is the same expression this loop used to hold inline,
+   * moved so the seat geometry a boarding employee is attached to is derived
+   * from the very same numbers that are drawn. See MONSTER_UNDULATION_RATE for
+   * the one tempo adjustment that lets the three motions come home together.
+   */
+  useFrame(() => {
+    const t = rideAnimationSecondsNow("monster");
 
-    if (rotorRef.current) rotorRef.current.rotation.y += delta * HUB_SPIN;
-    const rotorAngle = rotorRef.current?.rotation.y ?? 0;
+    if (rotorRef.current) rotorRef.current.rotation.y = HUB_SPIN * t;
 
     for (let i = 0; i < ARM_COUNT; i++) {
-      // Phase-offset sine across the five arms produces the travelling wave:
-      // as the hub turns, each arm rises and falls a fifth of a cycle apart.
-      // The oscillation is centred above level (UNDULATION_CENTER_TILT) so
-      // the low end of the swing has headroom above the ground by design.
-      const placementAngle = (i / ARM_COUNT) * Math.PI * 2;
-      const rawTilt =
-        UNDULATION_CENTER_TILT +
-        Math.sin(elapsed.current * UNDULATION_RATE + placementAngle) * UNDULATION_SWING;
-
-      // Defense-in-depth: derive this arm's current world position and clamp
-      // its tilt so the cart it carries can never dip through the ground,
-      // even if the tuned range above is later changed (§10 of the fix).
-      const worldAngle = rotorAngle + placementAngle;
-      const armWorldX = MONSTER_ORIGIN[0] + Math.cos(worldAngle) * ARM_LENGTH;
-      const armWorldZ = MONSTER_ORIGIN[2] + Math.sin(worldAngle) * ARM_LENGTH;
-      const tilt = clampTiltForGroundClearance(rawTilt, armWorldX, armWorldZ);
+      const tilt = monsterArmTilt(i, t);
 
       switch (i) {
         case 0: tilt0.current = tilt; break;
@@ -102,7 +90,7 @@ export function MonsterRide({ showLabels = false }: { showLabels?: boolean }) {
   });
 
   return (
-    <group position={MONSTER_ORIGIN}>
+    <group ref={root} position={MONSTER_ORIGIN}>
       <CentralTower />
 
       <group ref={rotorRef} position={[0, BASE_HEIGHT + ARM_ATTACH_HEIGHT, 0]}>

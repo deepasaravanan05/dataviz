@@ -1,15 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatSimTime } from "@/simulation/clock";
 import { advanceJourneyClock } from "@/simulation/journey/clock";
-import { CHECK_IN_COLOR_HEX, LOOP_START } from "@/simulation/journey/journey";
-import {
-  departmentOverview,
-  overviewTotals,
-} from "@/simulation/journey/overview";
-import { AVERAGE_DELAY, DELAY_BY_BAND, WORST_DELAY } from "@/simulation/journey/delayStats";
+import { CHECK_IN_COLOR_HEX } from "@/simulation/journey/journey";
+import { useActiveJourneyStore } from "@/simulation/journey/activeJourney";
+import { CalendarCard } from "@/components/dashboard/CalendarCard";
+import { DepartmentOverview } from "@/components/dashboard/DepartmentOverview";
+import { averageDelay, delayByBand, worstDelay } from "@/simulation/journey/delayStats";
 
 /**
  * The Employee Theme Park dashboard.
@@ -17,7 +16,7 @@ import { AVERAGE_DELAY, DELAY_BY_BAND, WORST_DELAY } from "@/simulation/journey/
  * A 2D companion to the 3D park, styled after the supplied sunset concept: a
  * glassmorphic calendar, the gold entrance lettering, and the department
  * check-in overview — but every number on it is counted live from the SAME
- * 50-row dataset and simulation clock the park animates. Nothing is quoted
+ * attendance dataset and simulation clock the park animates. Nothing is quoted
  * from the concept image; its fabricated departments and totals are replaced
  * by the project's real ones.
  *
@@ -30,88 +29,15 @@ import { AVERAGE_DELAY, DELAY_BY_BAND, WORST_DELAY } from "@/simulation/journey/
  * the visualization.
  */
 
-/** One fixed hue per department for its icon chip, in dataset order. */
-const DEPT_HUES = ["#4ade80", "#fbbf24", "#38bdf8", "#a78bfa", "#fb7185", "#34d399", "#f97316"];
-
-const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-const WEEKDAY_NAMES = [
-  "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY",
-];
-const MONTHS = [
-  "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
-  "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
-];
-
-/** The real current month, rendered after mount so prerender never disagrees. */
-function CalendarCard() {
-  const [today, setToday] = useState<Date | null>(null);
-  useEffect(() => {
-    // Set after a frame so prerendered HTML and first client render agree.
-    const id = requestAnimationFrame(() => setToday(new Date()));
-    return () => cancelAnimationFrame(id);
-  }, []);
-
-  const grid = useMemo(() => {
-    if (!today) return null;
-    const first = new Date(today.getFullYear(), today.getMonth(), 1);
-    const days = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-    const cells: (number | null)[] = Array.from({ length: first.getDay() }, () => null);
-    for (let d = 1; d <= days; d++) cells.push(d);
-    return cells;
-  }, [today]);
-
-  return (
-    <section
-      aria-label="Calendar"
-      className="rounded-2xl border border-white/10 bg-[#0d0f1c]/70 p-5 shadow-2xl shadow-black/50 backdrop-blur-xl"
-    >
-      {today && grid ? (
-        <>
-          <div className="text-sm font-semibold text-pink-400">{today.getFullYear()}</div>
-          <div className="text-2xl font-bold tracking-wide text-white">{MONTHS[today.getMonth()]}</div>
-          <div className="text-[11px] font-semibold tracking-[0.2em] text-pink-400/90">
-            {WEEKDAY_NAMES[today.getDay()]}
-          </div>
-          <div className="mt-3 grid grid-cols-7 gap-y-1.5 text-center text-[12px] tabular-nums">
-            {WEEKDAYS.map((w) => (
-              <div key={w} className={w === "SUN" ? "text-pink-400/90" : "text-white/50"}>
-                {w}
-              </div>
-            ))}
-            {grid.map((d, i) => (
-              <div key={i} className="flex items-center justify-center">
-                {d === null ? null : (
-                  <span
-                    className={[
-                      "flex h-6 w-6 items-center justify-center rounded-full",
-                      d === today.getDate()
-                        ? "bg-amber-400 font-bold text-slate-950"
-                        : i % 7 === 0
-                          ? "text-pink-400/90"
-                          : "text-white/80",
-                    ].join(" ")}
-                  >
-                    {d}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="h-56 animate-pulse rounded-xl bg-white/5" aria-hidden="true" />
-      )}
-    </section>
-  );
-}
-
 export default function DashboardPage() {
   /*
    * The shared journey clock drives the counts. Rendered state is only the
    * floored minute, so the page re-renders once per simulated minute rather
    * than sixty times a second.
    */
-  const [minute, setMinute] = useState(() => Math.floor(LOOP_START));
+  const loopStart = useActiveJourneyStore((s) => s.loopStart);
+  const employees = useActiveJourneyStore((s) => s.employees);
+  const [minute, setMinute] = useState(() => Math.floor(loopStart));
   const raf = useRef(0);
 
   useEffect(() => {
@@ -126,9 +52,6 @@ export default function DashboardPage() {
     raf.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf.current);
   }, []);
-
-  const rows = useMemo(() => departmentOverview(minute + 0.999), [minute]);
-  const totals = useMemo(() => overviewTotals(rows), [rows]);
 
   return (
     <main className="relative min-h-screen w-full overflow-x-hidden bg-[#12101d] text-white">
@@ -216,16 +139,16 @@ export default function DashboardPage() {
               <dl className="mt-3 space-y-2.5 text-[13px]">
                 <div className="flex items-baseline justify-between">
                   <dt className="text-white/55">Average delay</dt>
-                  <dd className="font-bold tabular-nums">{AVERAGE_DELAY.toFixed(1)} min</dd>
+                  <dd className="font-bold tabular-nums">{averageDelay(employees).toFixed(1)} min</dd>
                 </div>
                 <div className="flex items-baseline justify-between">
                   <dt className="text-white/55">Longest wait</dt>
                   <dd className="font-bold tabular-nums">
-                    {WORST_DELAY.delayMinutes} min
-                    <span className="ml-1.5 font-normal text-white/45">{WORST_DELAY.name}</span>
+                    {worstDelay(employees).delayMinutes} min
+                    <span className="ml-1.5 font-normal text-white/45">{worstDelay(employees).name}</span>
                   </dd>
                 </div>
-                {DELAY_BY_BAND.map((b) => (
+                {delayByBand(employees).map((b) => (
                   <div key={b.key} className="flex items-center justify-between">
                     <dt className="flex items-center gap-2 text-white/55">
                       <span
@@ -243,90 +166,8 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          {/* The overview table */}
-          <section
-            aria-label="Department check-in overview"
-            className="rounded-2xl border border-white/10 bg-[#0d0f1c]/72 p-5 shadow-2xl shadow-black/50 backdrop-blur-xl"
-          >
-            <h2 className="text-base font-bold tracking-wide text-white">
-              DEPARTMENT CHECK-IN OVERVIEW
-            </h2>
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[520px] border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-white/12 text-[10px] font-semibold uppercase tracking-[0.14em]">
-                    <th className="pb-2.5 pr-3 text-white/60">Department</th>
-                    <th className="pb-2.5 pr-3 text-right text-emerald-300/90">
-                      Check-in
-                      <br />
-                      count
-                    </th>
-                    <th className="pb-2.5 pr-3 text-right text-amber-300/90">
-                      Delayed
-                      <br />
-                      count
-                    </th>
-                    <th className="pb-2.5 text-right text-sky-300/90">
-                      Actual work
-                      <br />
-                      start count
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={r.department} className="border-b border-white/[0.06]">
-                      <td className="py-2.5 pr-3">
-                        <div className="flex items-center gap-2.5">
-                          <span
-                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-black text-slate-950"
-                            style={{ backgroundColor: DEPT_HUES[i % DEPT_HUES.length] }}
-                          >
-                            {r.department.slice(0, 1)}
-                          </span>
-                          <div className="leading-tight">
-                            <div className="text-[13px] font-medium text-white/90">{r.department}</div>
-                            <div className="text-[10px] text-white/40">
-                              {r.rideName} · {r.size} staff · avg {r.avgDelay.toFixed(1)} min
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-2.5 pr-3 text-right text-[15px] font-bold tabular-nums text-emerald-300">
-                        {r.checkedIn}
-                      </td>
-                      <td className="py-2.5 pr-3 text-right text-[15px] font-bold tabular-nums text-amber-300">
-                        {r.delayed}
-                      </td>
-                      <td className="py-2.5 text-right text-[15px] font-bold tabular-nums text-sky-300">
-                        {r.started}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td className="pt-3 text-sm font-bold tracking-wide text-white/85">TOTAL</td>
-                    <td className="pt-3 pr-3 text-right text-lg font-black tabular-nums text-emerald-300">
-                      {totals.checkedIn}
-                    </td>
-                    <td className="pt-3 pr-3 text-right text-lg font-black tabular-nums text-amber-300">
-                      {totals.delayed}
-                    </td>
-                    <td className="pt-3 text-right text-lg font-black tabular-nums text-sky-300">
-                      {totals.started}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-            <p className="mt-4 text-[11px] leading-relaxed text-white/40">
-              Check-in counts employees who have passed the main gate; actual work start counts
-              those already working; delayed is everyone in between, still walking, eating or
-              queueing. The columns follow the simulation clock — of {totals.size} employees, the
-              delayed column drains to zero as the morning completes.
-            </p>
-          </section>
+          {/* The overview table — shared with the Main Entrance overlay */}
+          <DepartmentOverview simTime={minute + 0.999} />
         </div>
       </div>
     </main>

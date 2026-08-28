@@ -1,8 +1,10 @@
 "use client";
 
 import { RoundedBox } from "@react-three/drei";
-import { CAR_LENGTH, PALETTE } from "./constants";
-import { SEAT_COLOR_HEX, seatsForCar } from "./seatManifest";
+import { CAR_LENGTH, PALETTE, SEAT_MOUNT_Y } from "./constants";
+import { seatsForCar } from "./seatManifest";
+import { SEAT_GREY, SEAT_GREY_DARK, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
+import { RIDE_SEAT_SCALE } from "@/world/scale";
 
 const SEAT_X = 0.42;
 const ROW_Z = 0.44;
@@ -12,8 +14,9 @@ const ROW_Z = 0.44;
  * with a 2x2 block of gray bucket seats and cyan over-shoulder restraints,
  * riding on a dark chassis with visible wheel assemblies.
  *
- * Each seat's headrest carries the employee-status colour so the 20/20/20
- * split reads clearly without repainting the car bodies.
+ * Ten of these make the train, four seats apiece — the 40 seats the ride now
+ * carries. Every part of the seat is grey; the rider's own uniform is what
+ * states their check-in band.
  */
 export function Car({ index }: { index: number }) {
   const seats = seatsForCar(index);
@@ -23,7 +26,7 @@ export function Car({ index }: { index: number }) {
       {/* Chassis */}
       <mesh position={[0, -0.3, 0]} castShadow>
         <boxGeometry args={[0.9, 0.22, CAR_LENGTH * 0.95]} />
-        <meshStandardMaterial color="#3c4046" metalness={0.7} roughness={0.4} />
+        <meshStandardMaterial color={PALETTE.carBodyDark} metalness={0.7} roughness={0.4} />
       </mesh>
 
       {/* Wheel assemblies (upper, side and under-track wheels) */}
@@ -36,7 +39,7 @@ export function Car({ index }: { index: number }) {
             castShadow
           >
             <cylinderGeometry args={[0.16, 0.16, 0.12, 10]} />
-            <meshStandardMaterial color="#2b2e33" metalness={0.6} roughness={0.5} />
+            <meshStandardMaterial color={PALETTE.carBodyDark} metalness={0.6} roughness={0.5} />
           </mesh>
         )),
       )}
@@ -81,24 +84,26 @@ export function Car({ index }: { index: number }) {
         // row 0 is the front row, so it sits toward +Z (direction of travel).
         const z = (seat.row === 0 ? 1 : -1) * ROW_Z;
         return (
-          <group key={seat.index} position={[x, 0.36, z]}>
+          <group key={seat.index} position={[x, SEAT_MOUNT_Y, z]} scale={RIDE_SEAT_SCALE}>
             {/* Seat base */}
             <mesh castShadow>
               <boxGeometry args={[0.34, 0.14, 0.36]} />
-              <meshStandardMaterial color={PALETTE.seat} roughness={0.7} metalness={0.1} />
+              {/* Grey, like every seat in the park — see world/seatColor.ts. */}
+              <meshStandardMaterial color={SEAT_GREY} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
             </mesh>
             {/* Seat back */}
             <mesh position={[0, 0.22, -0.14]} castShadow>
               <boxGeometry args={[0.34, 0.42, 0.12]} />
-              <meshStandardMaterial color={PALETTE.seatDark} roughness={0.7} metalness={0.1} />
+              <meshStandardMaterial color={SEAT_GREY_DARK} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
             </mesh>
-            {/* Headrest carries the status colour */}
+            {/* Headrest — grey too; nothing on a seat states a band. */}
             <mesh position={[0, 0.5, -0.13]} castShadow>
               <boxGeometry args={[0.3, 0.2, 0.14]} />
+              {/* Grey, like every seat in the park — see world/seatColor.ts. */}
               <meshStandardMaterial
-                color={SEAT_COLOR_HEX[seat.color]}
-                roughness={0.45}
-                metalness={0.15}
+                color={SEAT_GREY_DARK}
+                roughness={SEAT_ROUGHNESS}
+                metalness={SEAT_METALNESS}
               />
             </mesh>
             {/* Cyan over-shoulder restraint */}

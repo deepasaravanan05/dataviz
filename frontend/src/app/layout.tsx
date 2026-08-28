@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { DepartmentPanel } from "@/components/hud/DepartmentPanel";
 import { EmployeePanel } from "@/components/hud/EmployeePanel";
+import { FoodCourtPanel } from "@/components/hud/FoodCourtPanel";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,6 +32,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <DepartmentPanel />
         {/* Fixed top-left employee panel; renders nothing until an employee is clicked. */}
         <EmployeePanel />
+        {/* Same top-right corner as the ride panel, and mutually exclusive with
+            it; renders nothing until the food court is clicked. */}
+        <FoodCourtPanel />
       </body>
     </html>
   );

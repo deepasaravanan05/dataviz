@@ -7,11 +7,20 @@ import {
 import {
   ARM_COUNT,
   GONDOLAS_PER_ARM,
+  GONDOLA_HEIGHT,
+  GONDOLA_LOWEST_LOCAL,
   MONSTER_ORIGIN,
   RIDE_REACH,
   SEATS_PER_GONDOLA,
   SEAT_COUNT,
+  SEAT_MOUNT_Y,
+  TIP_TO_TUB_BOTTOM,
 } from "../src/components/monster-ride/constants";
+import { RIDE_SEAT_SCALE } from "../src/world/scale";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const ROOT = join(import.meta.dirname, "..");
 import { classifyDelay } from "../src/simulation/classification";
 import { COASTER_ORIGIN } from "../src/components/roller-coaster/constants";
 import { WHEEL_RADIUS, BASE_WIDTH, BASE_DEPTH } from "../src/components/ferris-wheel/constants";
@@ -24,17 +33,39 @@ function check(label: string, ok: boolean, detail: string) {
 
 validateRiders();
 
-// ---------- Seats (60 / 20-20-20, matches the project's status colours) ----------
+// ---------- Seats (30-40 per ride, evenly banded) ----------
+/*
+ * THE CAPACITY RULE IS NOW 30-40 SEATS PER RIDE, 40 PREFERRED, and the three
+ * GREEN / YELLOW / RED counts are an ALLOCATION order rather than a paint job —
+ * every seat in the park is grey. What has to hold is that the ride is inside
+ * the band, that the three allocation pools are even, and that they account for
+ * every seat; the old "60 and 20 apiece" said the same thing at the old count.
+ */
+
 const green = countRiderColor("GREEN");
 const yellow = countRiderColor("YELLOW");
 const red = countRiderColor("RED");
-check("seat count", RIDERS.length === 60, `${RIDERS.length}`);
-check("arms x gondolas x seats = 60", ARM_COUNT * GONDOLAS_PER_ARM * SEATS_PER_GONDOLA === 60, `${ARM_COUNT}x${GONDOLAS_PER_ARM}x${SEATS_PER_GONDOLA}`);
-check("SEAT_COUNT constant matches", SEAT_COUNT === 60, `${SEAT_COUNT}`);
-check("green riders", green === 20, `${green}`);
-check("yellow riders", yellow === 20, `${yellow}`);
-check("red riders", red === 20, `${red}`);
-check("colours sum to 60", green + yellow + red === 60, `${green + yellow + red}`);
+check(
+  "capacity is in the 30-40 band, at the preferred 40",
+  SEAT_COUNT >= 30 && SEAT_COUNT <= 40,
+  `${SEAT_COUNT} seats`,
+);
+check("seat count", RIDERS.length === SEAT_COUNT, `${RIDERS.length}`);
+check(
+  "every seat is a real place on a real gondola",
+  ARM_COUNT * GONDOLAS_PER_ARM * SEATS_PER_GONDOLA === SEAT_COUNT,
+  `${ARM_COUNT} arms x ${GONDOLAS_PER_ARM} gondolas x ${SEATS_PER_GONDOLA} seats = ${SEAT_COUNT}`,
+);
+check(
+  "the three allocation bands are even",
+  Math.max(green, yellow, red) - Math.min(green, yellow, red) <= 1,
+  `${green} green / ${yellow} yellow / ${red} red`,
+);
+check(
+  "every seat belongs to a band",
+  green + yellow + red === SEAT_COUNT,
+  `${green + yellow + red} of ${SEAT_COUNT}`,
+);
 check(
   "exact project hexes",
   SEAT_COLOR_HEX.GREEN === "#22C55E" && SEAT_COLOR_HEX.YELLOW === "#FACC15" && SEAT_COLOR_HEX.RED === "#EF4444",
@@ -67,10 +98,46 @@ const hasAllFields = RIDERS.every(
     r.rideArrivalTime >= r.checkInTime &&
     r.rideArrivalTime <= r.workStartTime,
 );
-check("every rider has check-in/ride/work-start/delay consistent", hasAllFields, "checked 60 riders");
+check("every rider has check-in/ride/work-start/delay consistent", hasAllFields, `checked ${RIDERS.length} riders`);
 
 const uniqueIds = new Set(RIDERS.map((r) => r.employeeId));
-check("employee IDs are unique", uniqueIds.size === 60, `${uniqueIds.size} unique ids`);
+check("employee IDs are unique", uniqueIds.size === RIDERS.length, `${uniqueIds.size} unique ids`);
+
+// ---------- Nothing on a gondola hangs lower than the model thinks ----------
+/*
+ * The ground clearance is solved from GONDOLA_LOWEST_LOCAL, so anything drawn
+ * below that number is invisible to the solver and will quietly plough through
+ * the grass. The bug that made this necessary was a torus with no rotation:
+ * TorusGeometry is built in the XY plane, so an unrotated one STANDS ON EDGE
+ * and hangs a full radius below where a flat band would sit. Every torus in the
+ * gondola must therefore declare a rotation.
+ */
+{
+  const gondolaSrc = readFileSync(
+    join(ROOT, "src", "components", "monster-ride", "Gondola.tsx"),
+    "utf8",
+  );
+  const toruses = gondolaSrc.match(/<mesh[^>]*>\s*<torusGeometry/g) ?? [];
+  const unrotated = (gondolaSrc.match(/<mesh(?![^>]*rotation)[^>]*>\s*<torusGeometry/g) ?? []).length;
+  check(
+    "no ring on a gondola stands on edge — every torus lies where it is meant to",
+    toruses.length > 0 && unrotated === 0,
+    `${toruses.length} torus band(s), ${unrotated} without a rotation`,
+  );
+  check(
+    "the clearance model measures the lowest part actually drawn",
+    Math.abs(
+      GONDOLA_LOWEST_LOCAL -
+        Math.min(
+          -GONDOLA_HEIGHT / 2,
+          -GONDOLA_HEIGHT / 2 + 0.12 - 0.09,
+          SEAT_MOUNT_Y - 0.39 * RIDE_SEAT_SCALE,
+        ),
+    ) < 1e-9,
+    `lowest gondola part ${GONDOLA_LOWEST_LOCAL.toFixed(3)}u below the tub's centre, ` +
+      `so a tip-to-lowest drop of ${TIP_TO_TUB_BOTTOM.toFixed(3)}u`,
+  );
+}
 
 // ---------- Placement / clearance from the other two rides ----------
 const monsterReach = RIDE_REACH;

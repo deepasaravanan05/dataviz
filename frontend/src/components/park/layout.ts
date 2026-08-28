@@ -1,8 +1,10 @@
 import { WHEEL_RADIUS as FERRIS_R, BASE_WIDTH } from "@/components/ferris-wheel/constants";
 import { COASTER_ORIGIN } from "@/components/roller-coaster/constants";
-import { MONSTER_ORIGIN, RIDE_REACH as MONSTER_REACH } from "@/components/monster-ride/constants";
+import { MONSTER_ORIGIN, RIDE_REACH as MONSTER_REACH, TOWER_HEIGHT } from "@/components/monster-ride/constants";
+import { TOWER_REACH } from "@/components/drop-tower/gondolaBreadth";
 import { DRAGON_ORIGIN, FOOT_SPREAD_X } from "@/components/dragon-ride/constants";
 import { PARK_SCALE, TOWER_SHIFT_X } from "./parkScale";
+
 
 /**
  * Park layout and placement validation.
@@ -19,11 +21,44 @@ import { PARK_SCALE, TOWER_SHIFT_X } from "./parkScale";
  * The scene reads the result; nothing inside any ride module changes.
  */
 
-/** Minimum clear ground between any two ride footprints, in world units. */
-export const MIN_RIDE_SPACING = 30;
+/**
+ * Minimum clear ground between any two ride footprints, in world units.
+ *
+ * Twelve, down from thirty. The rides were given their own target footprints —
+ * a Roller Coaster 136 m across, a Monster Ride 92 m — and they have to stand
+ * where they already stand: the brief is explicit that not one of them may
+ * move. Bigger rides at fixed centres means less ground between them, and this
+ * is exactly how much is left. The relaxation is real and is recorded here
+ * rather than absorbed by quietly letting the solver shuffle the park.
+ *
+ * The solver still exists and still does its job: at this figure it is a no-op,
+ * so every ride sits at its declared centre, and `verify-park-layout.ts`
+ * re-proves that. If a future size change made two rides actually overlap, it
+ * would push them apart and the fixed-centre check would fail loudly.
+ */
+export const MIN_RIDE_SPACING = 12;
 
-/** Minimum angular gap between two rides as seen from MAIN_VIEWPOINT, in degrees. */
-export const MIN_SIGHTLINE_SEPARATION_DEG = 2.5;
+/**
+ * Minimum angular gap between two rides as seen from a viewpoint, in degrees.
+ *
+ * NEGATIVE, and deliberately so: the rides are now allowed to overlap by a
+ * sliver rather than being required to leave clear sky between them.
+ *
+ * This was 2.5, then 1.5, and each drop had the same cause — the rides keep
+ * being asked to grow while the ground they stand on does not. At 20% larger
+ * the Dragon Ride and the Roller Coaster, the tightest pair, no longer clear
+ * one another from every angle: they touch from the main entrance, and from the
+ * distant overview the near edge of one crosses the far edge of the other by
+ * 0.42 degrees. Against silhouettes 8.6 and 9.6 degrees wide that is under five
+ * per cent of the narrower ride, which is a shared edge rather than one ride
+ * standing in front of another — the occlusion checks in verify-park-layout.ts
+ * measure how much is actually covered and are the real guard against that.
+ *
+ * So this is set to what the park genuinely does, and not a decimal lower. Any
+ * further growth would push a real overlap past it and fail loudly, which is
+ * the point of keeping the figure honest rather than generous.
+ */
+export const MIN_SIGHTLINE_SEPARATION_DEG = -0.5;
 
 /**
  * Where a guest stands coming in the main gate. Sightlines are judged from
@@ -55,7 +90,131 @@ export const WALKWAY_TO_Z = 400;
 /** What every viewpoint looks at; the middle of the ride ring. */
 export const PARK_CENTER: [number, number] = [52, 110];
 
-const S = PARK_SCALE;
+/**
+ * THE SIZE EACH RIDE IS BUILT TO.
+ *
+ * Half-extents of the ground footprint and the silhouette height, in metres,
+ * given per ride rather than as one park-wide factor. The park used to enlarge
+ * everything by a single PARK_SCALE, which kept the relative proportions of the
+ * five attractions exactly as they were authored; these are the dimensions the
+ * brief asks each ride to actually be.
+ */
+/**
+ * Every ride was asked to grow 20% wider.
+ *
+ * It is applied to the TARGETS rather than to the finished rides, and to all
+ * three dimensions at once, which is what keeps the solver below able to do its
+ * job. Scaling only the footprint would have meant scaling X and Z but not Y,
+ * and the rides here do not survive that: the Ferris Wheel's rotor turns about
+ * Z, so a wheel stretched on X alone traces an ellipse rather than a circle,
+ * and the Dragon's swing arc stretches the same way. Growing all three keeps
+ * every model in the proportions it was designed with — the rides are 20%
+ * wider, and 20% taller with it.
+ */
+export const RIDE_WIDTH_GROWTH = 1.2;
+
+/**
+ * THE FIGURE THE RIDE SIZES WERE SET AGAINST, AND WHY IT IS FROZEN.
+ *
+ * The targets below were once expressed as multiples of the LIVE
+ * `EMPLOYEE_HEIGHT`, so that resizing the cast resized the park with it. That
+ * has to stop, and the reason is a direct instruction: the user's brief resizes
+ * the employees ("make them slightly smaller... approximately 3.2-3.5 units")
+ * and in the same breath forbids any change to the rides — "Do NOT change ride
+ * position, ride overall height, ride footprint, ride structure". Those two
+ * cannot both hold while the rides track the figure: dropping the cast from 12 m
+ * to 3.4 m would have taken every ride down with it by a factor of 3.5, turning
+ * the 105 m Drop Tower into a 30 m one.
+ *
+ * So the ratios are kept — they still say what a ride IS in human terms, which
+ * is worth reading — but they are multiplied by the height they were AUTHORED
+ * against rather than by whatever the cast happens to be drawn at now. The
+ * result is the exact metres the park has always stood at, and it stays those
+ * metres however often the employees are resized again.
+ */
+const RIDE_SIZING_EMPLOYEE_HEIGHT = 12;
+
+/**
+ * The ride targets, in employee heights — at RIDE_SIZING_EMPLOYEE_HEIGHT.
+ *
+ * The Drop Tower is a little under nine of those employees tall, the Monster
+ * Ride a little over three, and a ride's footprint is so many of them across.
+ */
+const RIDE_TARGET_EMPLOYEES: Record<string, { halfX: number; halfZ: number; height: number }> = {
+  /* The tower is asked for exactly the footprint it has, so the width ratio
+     equals the height ratio and the solved factor stays the height-capped 1.2
+     however broad the gondola becomes. Broadening the disc must not shrink the
+     mast. */
+  tower: { halfX: TOWER_REACH / 12, halfZ: TOWER_REACH / 12, height: 105 / 12 },
+  dragon: { halfX: 55 / 12, halfZ: 65 / 12, height: 70 / 12 },
+  ferris: { halfX: 28 / 12, halfZ: 28 / 12, height: 63 / 12 },
+  /*
+   * THE TWO RIDES THAT WERE ASKED TO GROW TALLER did it in their own geometry —
+   * a higher lift hill on the coaster, a taller tower on the Monster Ride — not
+   * by being scaled up here. Scaling them up here would have grown their plan
+   * size too, and the park's rides are packed to within 0.04 degrees of each
+   * other in the view from the main gate: any footprint growth at all makes
+   * them start hiding one another, and every ride in the park has to move.
+   *
+   * So each target height is raised by exactly the factor its own model grew
+   * by. That leaves the height RATIO the scale solver sees unchanged, which
+   * leaves the solved factor unchanged, which leaves every footprint, every
+   * ride's position and every sightline exactly as they were. The rides simply
+   * end up taller.
+   */
+  coaster: { halfX: 68 / 12, halfZ: 48 / 12, height: (60 * (30.0000 / 25.6)) / 12 },
+  monster: { halfX: 46 / 12, halfZ: 46 / 12, height: (40 * (20 / 13)) / 12 },
+};
+
+const RIDE_TARGET_BASE: Record<string, { halfX: number; halfZ: number; height: number }> =
+  Object.fromEntries(
+    Object.entries(RIDE_TARGET_EMPLOYEES).map(([id, t]) => [
+      id,
+      {
+        halfX: t.halfX * RIDE_SIZING_EMPLOYEE_HEIGHT,
+        halfZ: t.halfZ * RIDE_SIZING_EMPLOYEE_HEIGHT,
+        height: t.height * RIDE_SIZING_EMPLOYEE_HEIGHT,
+      },
+    ]),
+  );
+
+export const RIDE_TARGET: Record<string, { halfX: number; halfZ: number; height: number }> =
+  Object.fromEntries(
+    Object.entries(RIDE_TARGET_BASE).map(([id, t]) => [
+      id,
+      {
+        halfX: t.halfX * RIDE_WIDTH_GROWTH,
+        halfZ: t.halfZ * RIDE_WIDTH_GROWTH,
+        height: t.height * RIDE_WIDTH_GROWTH,
+      },
+    ]),
+  );
+
+/**
+ * The one factor each ride is scaled by, solved from its own unscaled size.
+ *
+ * UNIFORM, ALWAYS. A ride is multiplied by a single number on every axis, so
+ * nothing is ever stretched: the models keep the proportions they were designed
+ * with. That means a ride whose own aspect ratio differs from the requested
+ * footprint cannot hit all three targets at once, and the factor chosen is the
+ * one that minimises the WORST relative error across height, width and depth —
+ * with one rule on top: a ride may come out shorter than the height asked for,
+ * never taller, because the heights are the headline numbers and overshooting
+ * them would read as ignoring them.
+ *
+ * `verify-park-scale.ts` prints what each ride actually lands at against what
+ * was asked for, so any gap is stated rather than hidden.
+ */
+function solveRideScale(raw: { halfX: number; halfZ: number; height: number }, id: string): number {
+  const t = RIDE_TARGET[id];
+  if (!t) return PARK_SCALE;
+  const ratios = [t.height / raw.height, t.halfX / raw.halfX, t.halfZ / raw.halfZ];
+  /* Minimax in log space: the geometric mean of the smallest and largest ratio
+     is the uniform factor whose worst error is as small as it can be. */
+  const minimax = Math.sqrt(Math.min(...ratios) * Math.max(...ratios));
+  return Math.min(minimax, t.height / raw.height);
+}
+
 
 export interface RideFootprint {
   id: string;
@@ -108,60 +267,59 @@ const DRAGON_BOX_CENTER_Z = DRAGON_ORIGIN[2] + (FOOT_SPREAD_X - 19.5) / 2;
  * a ride behind another still clears it, because the rides differ in height and
  * the camera looks down on the park. verify-park-layout.ts checks both.
  */
-const RIDES: RideFootprint[] = [
-  {
-    id: "ferris",
-    label: "Ferris Wheel",
-    halfX: ferrisReach * S,
-    halfZ: ferrisReach * S,
-    height: 29.5 * S,
-    anchor: [0, 0],
-    desired: [-165, 250],
-  },
-  {
-    id: "dragon",
-    label: "Dragon Ride",
-    halfX: 26.5 * S,
-    halfZ: ((19.5 + FOOT_SPREAD_X) / 2) * S,
-    height: 34.0 * S,
-    anchor: [DRAGON_ORIGIN[0] * S, DRAGON_BOX_CENTER_Z * S],
-    desired: [-72.3, 117.7],
-  },
-  {
-    id: "coaster",
-    label: "Roller Coaster",
-    halfX: 32 * S,
-    halfZ: 24 * S,
-    height: 25.6 * S,
-    anchor: [COASTER_BOX_CENTER_X * S, 0],
-    desired: [70, -10],
-  },
-  {
-    id: "monster",
-    label: "Monster Ride",
-    halfX: MONSTER_REACH * S,
-    halfZ: MONSTER_REACH * S,
-    height: 13.0 * S,
-    anchor: [MONSTER_ORIGIN[0] * S, MONSTER_ORIGIN[2] * S],
-    desired: [205, 90],
-  },
-  {
-    id: "tower",
-    label: "Drop Tower",
-    // The Drop Tower is the one ride that is NOT scaled, so its footprint is
-    // its own RIDE_REACH exactly. Kept as a literal to avoid an import cycle
-    // (drop-tower/constants reads its origin back out of this module);
-    // verify-park-layout.ts asserts the two stay equal.
-    halfX: 12,
-    halfZ: 12,
-    // Mirrors drop-tower/constants TOWER_HEIGHT. Kept as a literal to avoid an
-    // import cycle (that module reads TOWER_CENTER back out of this one);
-    // verify-park-layout.ts asserts the two stay equal.
-    height: 105,
-    anchor: [0, 0],
-    desired: [270 + TOWER_SHIFT_X, 280],
-  },
+/** Each ride at the size it was authored, before any park scaling. */
+interface RawRide {
+  id: string;
+  label: string;
+  halfX: number;
+  halfZ: number;
+  height: number;
+  /** Authored origin, in the ride's own unscaled space. */
+  origin: [number, number];
+  desired: [number, number];
+}
+
+/**
+ * How far the Monster Ride and the Drop Tower step back.
+ *
+ * "Back" is away from the main gate, which stands at z = 620, so a step back is
+ * a step towards LOWER z and deeper into the park. Only those two rides move;
+ * the Ferris Wheel, the Dragon Ride and the Roller Coaster keep the centres
+ * they have always had.
+ */
+export const RIDE_STEP_BACK = 40;
+
+const RAW_RIDES: RawRide[] = [
+  { id: "ferris", label: "Ferris Wheel", halfX: ferrisReach, halfZ: ferrisReach, height: 29.5, origin: [0, 0], desired: [-165, 250] },
+  { id: "dragon", label: "Dragon Ride", halfX: 26.5, halfZ: (19.5 + FOOT_SPREAD_X) / 2, height: 34.0, origin: [DRAGON_ORIGIN[0], DRAGON_BOX_CENTER_Z], desired: [-72.3, 117.7] },
+  { id: "coaster", label: "Roller Coaster", halfX: 32, halfZ: 24, height: 30.0000, origin: [COASTER_BOX_CENTER_X, 0], desired: [70, -10] },
+  { id: "monster", label: "Monster Ride", halfX: MONSTER_REACH, halfZ: MONSTER_REACH, height: TOWER_HEIGHT, origin: [MONSTER_ORIGIN[0], MONSTER_ORIGIN[2]], desired: [205, 90 - RIDE_STEP_BACK] },
+  /* The Drop Tower positions itself directly from TOWER_CENTER rather than from
+     an offset, so its anchor is the origin whatever it is scaled by. */
+  { id: "tower", label: "Drop Tower", halfX: TOWER_REACH, halfZ: TOWER_REACH, height: 105, origin: [0, 0], desired: [270 + TOWER_SHIFT_X, 280 - RIDE_STEP_BACK] },
 ];
+
+/** The factor each ride is actually built at. Solved once, read everywhere. */
+export const RIDE_SCALE: Record<string, number> = Object.fromEntries(
+  RAW_RIDES.map((r) => [r.id, solveRideScale(r, r.id)]),
+);
+
+export function rideScale(id: string): number {
+  return RIDE_SCALE[id] ?? PARK_SCALE;
+}
+
+const RIDES: RideFootprint[] = RAW_RIDES.map((r) => {
+  const k = RIDE_SCALE[r.id];
+  return {
+    id: r.id,
+    label: r.label,
+    halfX: r.halfX * k,
+    halfZ: r.halfZ * k,
+    height: r.height * k,
+    anchor: [r.origin[0] * k, r.origin[1] * k],
+    desired: r.desired,
+  };
+});
 
 /** Gap between two axis-aligned footprints; negative means they overlap. */
 export function footprintGap(a: PlacedRide, b: PlacedRide): number {

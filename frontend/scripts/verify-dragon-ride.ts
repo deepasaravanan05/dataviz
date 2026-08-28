@@ -1,3 +1,11 @@
+import {
+  DRAGON_SPHERES,
+  DRAGON_Z_HALF,
+  DRAGON_OUTREACHES_HULL,
+  TAIL_LENGTH,
+  NECK_LENGTH,
+  MUZZLE_LENGTH,
+} from "../src/components/dragon-ride/dragonProfile";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -56,11 +64,27 @@ validateRiders();
 const componentsDir = join(__dirname, "..", "src", "components", "dragon-ride");
 const src = (f: string) => readFileSync(join(componentsDir, f), "utf8");
 
-// ============ 1. Seats: 60 total, 20/20/20, sourced from the EXISTING ride ============
-check("60 seats total", DRAGON_RIDERS.length === SEAT_COUNT && SEAT_COUNT === 60, `${DRAGON_RIDERS.length}`);
+// ============ 1. Seats: 30-40, evenly banded, from the EXISTING ride ============
+/*
+ * THE CAPACITY RULE IS NOW 30-40 SEATS PER RIDE, 40 PREFERRED, and the three
+ * GREEN / YELLOW / RED counts are an ALLOCATION order rather than a paint job —
+ * every seat in the park is grey. What has to hold is that the ride is inside
+ * the band, that the three allocation pools are even, and that they account for
+ * every seat; the old "60 and 20 apiece" said the same thing at the old count.
+ */
+check(
+  "capacity is in the 30-40 band, at the preferred 40",
+  SEAT_COUNT >= 30 && SEAT_COUNT <= 40,
+  `${SEAT_COUNT} seats`,
+);
+check("every seat has a rider record", DRAGON_RIDERS.length === SEAT_COUNT, `${DRAGON_RIDERS.length}`);
 check("seat grid matches seat count", SEAT_ROWS * SEATS_PER_ROW === SEAT_COUNT, `${SEAT_ROWS}x${SEATS_PER_ROW}`);
 for (const color of ["GREEN", "YELLOW", "RED"] as const) {
-  check(`exactly 20 ${color} seats`, countSeatColor(color) === 20, `${countSeatColor(color)}`);
+  check(
+    `the ${color} allocation band is even`,
+    Math.abs(countSeatColor(color) - SEAT_COUNT / 3) <= 1,
+    `${countSeatColor(color)} of ${SEAT_COUNT}`,
+  );
 }
 check(
   "every seat id is unique",
@@ -109,7 +133,7 @@ check(
 
 // ============ 2. Dispatch rule: reuses the existing queue/seat logic ============
 // Drive the REAL findFreeSeat() against a fresh copy of the REAL ride to prove
-// the 5-employee rule and the 60-passenger ceiling both still behave.
+// the 5-employee rule and the capacity ceiling both still behave.
 const live = createRide();
 let seated = 0;
 for (let i = 0; i < 80; i++) {
@@ -118,7 +142,11 @@ for (let i = 0; i < 80; i++) {
   seat.occupied = true;
   seated++;
 }
-check("ride cannot exceed 60 passengers", seated === 60, `${seated} seated before findFreeSeat() returned null`);
+check(
+  "the simulation's own ride still fills to its declared capacity and no further",
+  seated === RIDE_CAPACITY,
+  `${seated} seated before findFreeSeat() returned null, against a declared ${RIDE_CAPACITY}`,
+);
 check(
   "dispatch threshold is 5 employees",
   reference.minStartCount === 5,
@@ -239,6 +267,54 @@ check(
   `pivot ${PIVOT_Y}u, keel hangs ${Math.abs(HULL_LOCAL.yBottom)}u below it -> rest height ${(PIVOT_Y + HULL_LOCAL.yBottom).toFixed(1)}u`,
 );
 
+// ============ 4b. The carved dragon, and the envelope that must cover it ============
+/*
+ * The dragon is not decoration as far as the maths is concerned: its neck and
+ * its tail both reach further fore and aft than the hull box does, so the swing
+ * sweep above has to measure THEM, not just the boat. These checks prove that
+ * the sweep really does, and that the animal at each end is a real length
+ * rather than a stub.
+ */
+check(
+  "the carved dragon reaches further than the hull box",
+  DRAGON_OUTREACHES_HULL,
+  `dragon reaches ${DRAGON_Z_HALF.toFixed(1)}u from the ship's centre vs the hull's ${(HULL_LENGTH / 2).toFixed(1)}u`,
+);
+check(
+  "the swept envelope covers the dragon, not merely the hull",
+  (() => {
+    let covered = true;
+    for (let i = 0; i <= 2000; i++) {
+      const theta = -SWING_MAX + (i / 2000) * 2 * SWING_MAX;
+      const c = Math.cos(theta);
+      const sn = Math.sin(theta);
+      for (const p of DRAGON_SPHERES) {
+        const reach = Math.abs(p.y * sn + p.z * c) + p.radius;
+        const low = PIVOT_Y + p.y * c - p.z * sn - p.radius;
+        if (reach > maxHullHorizontalReach(theta) + 1e-9) covered = false;
+        if (low < lowestHullY(theta) - 1e-9) covered = false;
+      }
+    }
+    return covered;
+  })(),
+  `${DRAGON_SPHERES.length} body spheres swept against the declared envelope at every angle`,
+);
+check(
+  "the tail is a real tail, not a scroll on the transom",
+  TAIL_LENGTH > 12,
+  `${TAIL_LENGTH.toFixed(1)}u of tail against ${NECK_LENGTH.toFixed(1)}u of neck`,
+);
+check(
+  "the muzzle is long enough to read as a face rather than a lump",
+  MUZZLE_LENGTH > 2.5 * 1.1,
+  `muzzle ${MUZZLE_LENGTH}u in front of a ${(0.98 * 2).toFixed(2)}u skull`,
+);
+check(
+  "the dragon stays above the deck line for its whole length",
+  Math.min(...DRAGON_SPHERES.map((p) => p.y - p.radius)) > HULL_LOCAL.yBottom,
+  `lowest point of the carving hangs ${(Math.min(...DRAGON_SPHERES.map((p) => p.y - p.radius)) - HULL_LOCAL.yBottom).toFixed(2)}u above the keel`,
+);
+
 // ============ 5. Scale: genuinely massive ============
 const ferrisTop = WHEEL_CENTER_HEIGHT + FERRIS_R;
 check(
@@ -341,11 +417,23 @@ check(
   ),
   "the park's existing camera system is untouched",
 );
+/*
+ * The ship's seats used to carry sixty permanently-seated figures, and this
+ * check asserted THEY were nested inside the swinging group. They are gone —
+ * a seat that always looked occupied made a rider who had walked back down
+ * read as never having got off. The property still matters, so it now applies
+ * to the SEATS, which is what a boarding employee is attached to:
+ * `verify-boarding.ts` proves the employee tracks the seat to within nothing.
+ */
 check(
-  "riders are children of the swinging group, so they follow the ship",
-  /<group ref=\{shipRef\}[\s\S]*<Ship/.test(src("DragonRide.tsx")) &&
-    /<SeatedRider/.test(src("Ship.tsx")),
-  "SeatedRider is nested inside the group whose rotation.x is animated",
+  "the seats are children of the swinging group, so a rider follows the ship",
+  /<group ref=\{shipRef\}[\s\S]*<Ship/.test(src("DragonRide.tsx")) && /<Seat \/>/.test(src("Ship.tsx")),
+  "the seats are nested inside the group whose rotation.x is animated",
+);
+check(
+  "and the ship carries no passenger of its own",
+  !/<SeatedRider/.test(src("Ship.tsx")),
+  "a seat is empty unless an employee off the attendance sheet is in it",
 );
 check(
   "only rotation.x is animated — the pivot cannot drift",

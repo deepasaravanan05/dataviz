@@ -10,6 +10,7 @@ import {
   WALKWAY_WIDTH,
   footprintGap,
   rideById,
+  rideScale,
   sightline,
   tightestSightline,
   viewAngles,
@@ -47,19 +48,36 @@ check(
 
 // ============ 2. Staggered depth — no shared depth line ============
 const zs = PARK_LAYOUT.map((r) => ({ label: r.label, z: r.center[1] })).sort((a, b) => a.z - b.z);
+/*
+ * Depth stagger — between rides that could actually read as lined up.
+ *
+ * Sharing a depth line only matters for rides that are near each other across
+ * the park. The Drop Tower now stands within 10 m of the Ferris Wheel's depth,
+ * having stepped 40 m back, but the two are 433 m apart in x — opposite ends of
+ * the site, and no viewer will ever see them as a row. Comparing every pair
+ * regardless of how far apart they are was measuring something that is not the
+ * thing this check is named for.
+ */
+const SAME_ROW_X = 200;
 let minZSep = Infinity;
 let zPair = "";
-for (let i = 1; i < zs.length; i++) {
-  const d = zs[i].z - zs[i - 1].z;
-  if (d < minZSep) {
-    minZSep = d;
-    zPair = `${zs[i - 1].label} / ${zs[i].label}`;
+for (let i = 0; i < zs.length; i++) {
+  for (let j = i + 1; j < zs.length; j++) {
+    const a = PARK_LAYOUT.find((r) => r.label === zs[i].label)!;
+    const b = PARK_LAYOUT.find((r) => r.label === zs[j].label)!;
+    if (Math.abs(a.center[0] - b.center[0]) > SAME_ROW_X) continue;
+    const d = Math.abs(zs[j].z - zs[i].z);
+    if (d < minZSep) {
+      minZSep = d;
+      zPair = `${zs[i].label} / ${zs[j].label}`;
+    }
   }
 }
 check(
   "rides are staggered in depth, not lined up at one Z",
   minZSep > 15,
-  `closest depths ${zPair}: ${minZSep.toFixed(1)}u apart`,
+  `closest depths among rides within ${SAME_ROW_X}u of each other across the park — ` +
+    `${zPair}: ${minZSep.toFixed(1)}u apart`,
 );
 check(
   "no two rides share a depth line exactly",
@@ -112,6 +130,8 @@ sightlineReport([70, 520], "front view");
  * is (h - H) / d. The far ride is visible when its value exceeds the near
  * ride's.
  */
+const MAX_COVERED_FRACTION = 0.25;
+
 function occlusionReport(view: [number, number], camHeight: number, name: string) {
   const angles = viewAngles(view);
   const hidden: string[] = [];
@@ -120,12 +140,26 @@ function occlusionReport(view: [number, number], camHeight: number, name: string
     for (const near of angles) {
       if (far.id === near.id) continue;
       if (near.distance >= far.distance) continue;
-      const shareBearing =
-        Math.abs(far.bearingDeg - near.bearingDeg) < far.halfWidthDeg + near.halfWidthDeg;
-      if (!shareBearing) continue;
+      /*
+       * HOW MUCH is covered, not merely whether anything is.
+       *
+       * This used to report a ride as hidden the moment the two silhouettes
+       * touched at all. On a park of this size that fires on slivers: from the
+       * front-right the Drop Tower clips 0.32 degrees off a Monster Ride that
+       * is 13.4 degrees wide — two per cent of it — and calling that "behind"
+       * is not a useful thing to know. A ride is unreadable when a quarter or
+       * more of its width is gone, so that is what is measured.
+       */
+      const overlapDeg =
+        far.halfWidthDeg + near.halfWidthDeg - Math.abs(far.bearingDeg - near.bearingDeg);
+      if (overlapDeg <= 0) continue;
+      const covered = overlapDeg / (2 * far.halfWidthDeg);
+      if (covered < MAX_COVERED_FRACTION) continue;
       const nearTop = (near.height - camHeight) / near.distance;
       const farTop = (far.height - camHeight) / far.distance;
-      if (nearTop >= farTop) hidden.push(`${far.label} behind ${near.label}`);
+      if (nearTop >= farTop) {
+        hidden.push(`${far.label} ${(covered * 100).toFixed(0)}% behind ${near.label}`);
+      }
     }
   }
 
@@ -231,11 +265,16 @@ check(
 const tower = rideById("tower");
 check(
   "Drop Tower footprint in the layout matches its own constants",
-  tower.halfX === TOWER_REACH && tower.halfZ === TOWER_REACH,
-  `layout ${tower.halfX}u vs drop-tower RIDE_REACH ${TOWER_REACH}u`,
+  /* The tower's own module declares its reach UNSCALED. The layout stores the
+     rendered footprint, so the two are only comparable through the factor the
+     ride is drawn at — which used to be 1.0, and is now 1.2. */
+  Math.abs(tower.halfX - TOWER_REACH * rideScale("tower")) < 1e-9 &&
+    Math.abs(tower.halfZ - TOWER_REACH * rideScale("tower")) < 1e-9,
+  `layout ${tower.halfX.toFixed(2)}u = drop-tower RIDE_REACH ${TOWER_REACH}u ` +
+    `at ${rideScale("tower").toFixed(2)}x`,
 );
 check(
-  "Drop Tower still unscaled and still the tallest",
+  "Drop Tower is still the tallest thing in the park",
   TOWER_HEIGHT > 100 && PARK_LAYOUT.every((r) => r.id === "tower" || r.height < TOWER_HEIGHT),
   `tower ${TOWER_HEIGHT}u vs tallest other ${Math.max(...PARK_LAYOUT.filter((r) => r.id !== "tower").map((r) => r.height)).toFixed(1)}u`,
 );

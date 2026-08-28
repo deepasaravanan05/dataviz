@@ -8,8 +8,8 @@ import { SEATS_PER_ROW, SEAT_ROWS } from "./constants";
  * Seat manifest for the Dragon Swing Ship.
  *
  * IMPORTANT — no new seat-colour or dispatch system is introduced here. The
- * 60 seats, their ids and their 20 GREEN / 20 YELLOW / 20 RED split all come
- * straight out of the park's existing `createRide()` factory, and every
+ * seat ids and their GREEN / YELLOW / RED allocation bands all come straight
+ * out of the park's existing `createRide()` factory, and every
  * rider's colour is produced by the existing `classifyDelay()` using the
  * existing `DELAY_THRESHOLDS`. This module only decides where each of those
  * existing seats sits inside the hull and what its floating time label reads.
@@ -67,12 +67,20 @@ const DELAY_BANDS: Record<SeatColor, [number, number]> = {
 };
 
 /**
- * Column colour pattern, repeated on every row. Six seats per row as
- * 2 GREEN / 2 YELLOW / 2 RED across ten rows lands on exactly 20 of each,
- * and keeps the three colours interleaved across the whole deck instead of
- * leaving three solid blocks of colour.
+ * The allocation cycle, running seat by seat across the whole deck rather than
+ * column by column.
+ *
+ * Cycling over the flat seat index is what keeps the three bands even at ANY
+ * seat count: at the deck's 40 seats it lands 14 / 13 / 13, where a fixed
+ * six-column pattern truncated to four columns would have given 20 / 10 / 10
+ * and drained one of `createRide()`'s pools dry. No two neighbours in a row
+ * share a band, and consecutive rows are offset by one, so the interleaving the
+ * old pattern gave is kept.
+ *
+ * Nothing is PAINTED with these: every seat on the deck is grey, and the band
+ * only decides which seat is handed out first.
  */
-const COLUMN_COLORS: SeatColor[] = ["GREEN", "YELLOW", "RED", "GREEN", "YELLOW", "RED"];
+const COLOR_CYCLE: SeatColor[] = ["GREEN", "YELLOW", "RED"];
 
 function buildRiders(): DragonRider[] {
   const rand = mulberry32(0xd2a6);
@@ -89,7 +97,7 @@ function buildRiders(): DragonRider[] {
 
   for (let row = 0; row < SEAT_ROWS; row++) {
     for (let col = 0; col < SEATS_PER_ROW; col++) {
-      const color = COLUMN_COLORS[col];
+      const color = COLOR_CYCLE[(row * SEATS_PER_ROW + col) % COLOR_CYCLE.length];
       const seat = pools[color][taken[color]++];
 
       const [lo, hi] = DELAY_BANDS[color];

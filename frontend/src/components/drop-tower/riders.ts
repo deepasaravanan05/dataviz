@@ -7,11 +7,15 @@ import { SEAT_COUNT } from "./constants";
 /**
  * Seat manifest for the Drop Tower.
  *
- * No new seat-colour or dispatch system is introduced. The 60 seats, their ids
- * and their 20 GREEN / 20 YELLOW / 20 RED split come straight out of the park's
+ * No new seat-colour or dispatch system is introduced. The seat ids and the
+ * GREEN / YELLOW / RED allocation bands come straight out of the park's
  * existing `createRide()` factory, and every rider's colour is produced by the
  * existing `classifyDelay()` against the existing `DELAY_THRESHOLDS`. This
  * module only decides which seat sits at which angle around the gondola.
+ *
+ * The ring now carries SEAT_COUNT = 40 rather than 60, so the cycle below draws
+ * 14 / 13 / 13 out of `createRide()`'s pools instead of 20 / 20 / 20. The
+ * factory itself is untouched.
  *
  * This deliberately mirrors the Dragon Ride's manifest rather than sharing a
  * helper with it: refactoring that ride's module would mean editing an existing
@@ -34,7 +38,7 @@ export const SEAT_COLOR_HEX: Record<SeatColor, string> = {
 export interface TowerRider {
   seatId: string;
   seatColor: SeatColor;
-  /** Index around the ring, 0..59. */
+  /** Index around the ring, 0..SEAT_COUNT-1. */
   seatIndex: number;
   employeeId: string;
   checkInTime: number;
@@ -63,9 +67,9 @@ const DELAY_BANDS: Record<SeatColor, [number, number]> = {
 };
 
 /**
- * Colours cycle seat by seat around the ring. With 60 seats and three colours
- * that is exactly 20 of each, and no two neighbours share a colour — the
- * opposite of three large coloured sections.
+ * Colours cycle seat by seat around the ring, so no two neighbours share one —
+ * the opposite of three large coloured sections. Nothing is PAINTED with them:
+ * every seat on the ring is grey, and the band only decides allocation order.
  */
 const COLOR_CYCLE: SeatColor[] = ["GREEN", "YELLOW", "RED"];
 

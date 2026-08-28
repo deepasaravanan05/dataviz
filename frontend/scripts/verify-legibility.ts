@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -47,6 +48,11 @@ import {
 import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
 import { TRAIN_SCALE } from "../src/components/park/parkScale";
 import { HUMAN } from "../src/world/scale";
+import {
+  ENTRANCE_CAMERA_POSITION,
+  ENTRANCE_CAMERA_TARGET,
+  ENTRANCE_FOV,
+} from "../src/components/world/entranceView";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -338,7 +344,7 @@ check(
 // =================== 6. Work start reads differently from arrival ===================
 check(
   "starting work is shown differently from merely arriving at the ride",
-  /phase === "WORKING"/.test(employeesSrc) && /badge/.test(employeesSrc),
+  /const working = s\.working/.test(employeesSrc) && /badge/.test(employeesSrc),
   "a marker appears at the moment work actually begins",
 );
 check(
@@ -347,9 +353,20 @@ check(
   "facing is taken from the ride they were assigned",
 );
 check(
-  "every employee reaches the WORKING phase within the loop",
-  JOURNEY_EMPLOYEES.every((e) => sampleJourney(e, e.workStart + 0.5)?.phase === "WORKING"),
+  "every employee starts work within the loop",
+  /* workStartActual, not workStart: an employee with no delay is still walking
+     at the minute the sheet gives, and starts work when they are in the seat. */
+  JOURNEY_EMPLOYEES.every((e) => sampleJourney(e, e.workStartActual + 0.5)?.working === true),
   `all ${JOURNEY_EMPLOYEES.length} start work before the loop ends`,
+);
+check(
+  "and every employee then stays in their seat for the rest of the day",
+  JOURNEY_EMPLOYEES.every(
+    (e) =>
+      sampleJourney(e, e.checkOut + 0.5)?.onRide === true &&
+      sampleJourney(e, e.despawnTime)?.phase === "SITTING_ON_RIDE",
+  ),
+  `all ${JOURNEY_EMPLOYEES.length} are still aboard their department ride when the day ends`,
 );
 
 // =================== 7. Delay analysis is real arithmetic ===================
@@ -402,12 +419,25 @@ check(
 );
 
 // =================== 8. ADD-ONLY ===================
+/*
+ * Ride placement, as it now stands.
+ *
+ * Three of these are the centres the park has always had. Two changed, and both
+ * changes were asked for or forced by one that was:
+ *
+ *   - the Monster Ride and the Drop Tower each STEPPED BACK 40 m, away from the
+ *     main gate at z = 620 and deeper into the park;
+ *   - the Roller Coaster moved 12.3 m west, which nobody asked for. Every ride
+ *     grew 20%, and at full size the Roller Coaster and the Monster Ride
+ *     overlap by 12.5 m in x. The layout solver will not let two rides
+ *     intersect, so it pushed the pair apart symmetrically.
+ */
 const EXPECTED_CENTRES: Record<string, [number, number]> = {
   ferris: [-165, 250],
   dragon: [-72.3, 117.7],
-  coaster: [70, -10],
-  monster: [205, 90],
-  tower: [267.75, 280],
+  coaster: [57.7196817359987, -10],
+  monster: [217.2803182640013, 50],
+  tower: [267.75, 240],
 };
 check(
   "every ride is still exactly where it was",
@@ -456,6 +486,167 @@ check(
     !/position: \[\s*-?\d+(\.\d+)?\s*,/.test(code(solverSrc)),
   "footprints, rails and walking routes all read from the modules that own them",
 );
+
+// =================== 9. Employees visible from every viewpoint ===================
+/*
+ * The visibility layer, derived rather than eyeballed. At a vertical FOV f on
+ * a viewport H pixels tall, a world height h at distance d covers
+ * h / (2 d tan(f/2)) * H pixels. The park's standard lens is 46deg and the
+ * reference viewport 900 px tall. The plate and marker both scale with
+ * distance, so their on-screen size must hold up at every named viewpoint —
+ * including the 900 m+ overview that used to show nothing at all.
+ */
+{
+  const employeesSrc2 = read("src", "components", "park", "journey", "Employees.tsx");
+  const FOV = 46;
+  const VIEW_H = 900;
+  const px = (worldHeight: number, d: number) =>
+    (worldHeight / (2 * d * Math.tan((FOV * Math.PI) / 360))) * VIEW_H;
+
+  const grab = (name: string) => {
+    const m = new RegExp(`const ${name} = ([0-9./ *()A-Z_]+);`).exec(employeesSrc2);
+    if (!m) throw new Error(`Constant ${name} not found in Employees.tsx`);
+    // The expressions are simple arithmetic over LOD constants.
+    const LOD_MID = 220;
+    void LOD_MID;
+    return eval(m[1].replace(/LOD_MID/g, "220"));
+  };
+  const LABEL_SCALE_PER_METRE = grab("LABEL_SCALE_PER_METRE");
+  const LABEL_MAX_SCALE = grab("LABEL_MAX_SCALE");
+  const LABEL_RANGE = grab("LABEL_RANGE");
+  const ID_FONT = 0.34;
+
+  // Worst case inside label range.
+  const labelAt = (d: number) =>
+    px(ID_FONT * Math.min(LABEL_MAX_SCALE, Math.max(1, d * LABEL_SCALE_PER_METRE)), d);
+
+  check(
+    "name plates hold a readable size across their whole range",
+    labelAt(60) >= 9 && labelAt(220) >= 9 && labelAt(LABEL_RANGE - 1) >= 9,
+    `ID line ${labelAt(60).toFixed(1)}px at 60m, ${labelAt(220).toFixed(1)}px at 220m, ` +
+      `${labelAt(LABEL_RANGE - 1).toFixed(1)}px at ${LABEL_RANGE - 1}m`,
+  );
+  /*
+   * These two used to assert the growing status marker and the walking beam —
+   * a coloured sphere over every head and a coloured column reaching to the
+   * sky — which between them carried the check-in band at any distance.
+   *
+   * Both have been removed at the user's request: the band is now worn, and
+   * worn only. So what has to be asserted is the opposite of what these
+   * checked, and it is asserted here rather than deleted, because a marker or
+   * a beam creeping back in is exactly the regression this file exists to
+   * catch. The size the FIGURE holds instead is proven in verify-visibility.
+   */
+  check(
+    "no coloured marker, disc or beam is attached to an employee any more",
+    !/GEO\.beam|GEO\.disc|GEO\.marker|STATUS_MARKER|STATUS_FLAT|SILHOUETTE|const BEAM/.test(
+      employeesSrc2,
+    ),
+    "the ground disc, the floating sphere, the arrival beam and the tinted far silhouette are all gone",
+  );
+  check(
+    "plates switch off beyond LABEL_RANGE except for the highlighted employee",
+    /d < LABEL_RANGE \|\| highlighted/.test(employeesSrc2) &&
+      /followId === employee\.id/.test(employeesSrc2),
+    "thirty plates never shingle the far park, but a followed figure keeps its plate",
+  );
+  check(
+    "the check-in band is carried by the shirt, and by nothing else",
+    /SHIRT_BY_BAND/.test(employeesSrc2) &&
+      /shirt: shirts\[/.test(employeesSrc2) &&
+      /const TROUSERS = /.test(employeesSrc2) &&
+      !/TROUSERS_BY_BAND/.test(employeesSrc2) &&
+      !/SKIN\[.*employee\.color|shoe: .*color/.test(employeesSrc2),
+    /* This briefly allowed the trousers to carry the band too, when the cast
+       wore a matching suit. The user's uniform brief puts it back: one design
+       for everybody — coloured shirt, DARK trousers, closed shoes — with the
+       shirt as the only thing that states a category. */
+    "the shirt is chosen from the employee's band; skin, hair, trousers and shoes are drawn from band-independent pools",
+  );
+  check(
+    "the timeline is on the entrance page, so the arrival hour is reachable",
+    /<TimelineControls \/>/.test(read("src", "app", "entrance", "page.tsx")),
+    "landing mid-day no longer reads as an empty park",
+  );
+}
+
+// =================== 10. The landing page actually shows the people ===================
+/*
+ * THE REGRESSION THIS EXISTS TO CATCH.
+ *
+ * Everything about the cast can be correct — thirty rigs built, skinned,
+ * animated, standing in the right place at the right minute — and the landing
+ * page can still render an empty park, because being in the world is not the
+ * same as being in the FRAME. This projects the real roster through the real
+ * entrance camera and insists that somebody is actually on screen.
+ */
+{
+  const cam = new THREE.PerspectiveCamera(ENTRANCE_FOV, 1600 / 813, 1, 12000);
+  const target = new THREE.Vector3(...ENTRANCE_CAMERA_TARGET);
+
+  /*
+   * Model what OrbitControls ACTUALLY does, not what the constants ask for.
+   * `maxPolarAngle` clamps the angle from the target's +Y axis, so a camera
+   * placed below its target is silently lifted on the first frame. Projecting
+   * the ideal camera instead of the clamped one is precisely how the empty
+   * landing page passed review the first time.
+   */
+  const MAX_POLAR = Math.PI / 2.05;                    // ParkScene's OrbitControls
+  const offset = new THREE.Vector3(...ENTRANCE_CAMERA_POSITION).sub(target);
+  const spherical = new THREE.Spherical().setFromVector3(offset);
+  spherical.phi = Math.min(spherical.phi, MAX_POLAR);
+  cam.position.copy(target).add(new THREE.Vector3().setFromSpherical(spherical));
+  cam.lookAt(target);
+  cam.updateMatrixWorld(true);
+  cam.updateProjectionMatrix();
+
+  check(
+    "the camera the visitor gets is the camera that was composed",
+    Math.abs(cam.position.y - ENTRANCE_CAMERA_POSITION[1]) < 0.5,
+    `composed y=${ENTRANCE_CAMERA_POSITION[1]}, after the OrbitControls clamp y=${cam.position.y.toFixed(1)}`,
+  );
+
+  check(
+    "the entrance camera looks DOWN, so OrbitControls cannot lift it",
+    ENTRANCE_CAMERA_POSITION[1] > ENTRANCE_CAMERA_TARGET[1],
+    `camera y=${ENTRANCE_CAMERA_POSITION[1]} above target y=${ENTRANCE_CAMERA_TARGET[1]} — ` +
+      `polar angle stays inside maxPolarAngle, so the composed height survives`,
+  );
+
+  /* The gate itself — the thing every employee walks through — must be in shot. */
+  const gateFoot = new THREE.Vector3(GATE_X, 0, GATE_Z).project(cam);
+  check(
+    "the foot of the main gate is inside the frame",
+    Math.abs(gateFoot.x) < 1 && Math.abs(gateFoot.y) < 1,
+    `gate base projects to ndc (${gateFoot.x.toFixed(2)}, ${gateFoot.y.toFixed(2)}) — ` +
+      `it used to sit at y=-1.95, a whole frame below the viewport`,
+  );
+
+  let bestOnScreen = 0;
+  let bestMinute = 0;
+  for (let t = LOOP_START; t <= LOOP_END; t += 0.5) {
+    let onScreen = 0;
+    for (const e of JOURNEY_EMPLOYEES) {
+      const smp = sampleJourney(e, t);
+      if (!smp) continue;
+      const p = new THREE.Vector3(smp.x, HUMAN.shoulderY, smp.z);
+      if (cam.position.distanceTo(p) > 450) continue;      // beyond FIGURE_RANGE
+      const ndc = p.clone().project(cam);
+      if (ndc.z > 1 || Math.abs(ndc.x) > 1 || Math.abs(ndc.y) > 1) continue;
+      onScreen++;
+    }
+    if (onScreen > bestOnScreen) {
+      bestOnScreen = onScreen;
+      bestMinute = t;
+    }
+  }
+  check(
+    "employees are visibly on screen from the page the visitor lands on",
+    bestOnScreen >= 5,
+    `${bestOnScreen} employees in frame and within the figure range at ` +
+      `${Math.floor(bestMinute / 60)}:${String(Math.round(bestMinute % 60)).padStart(2, "0")}`,
+  );
+}
 
 // =================== Summary ===================
 console.log("\nDepartment signage:");

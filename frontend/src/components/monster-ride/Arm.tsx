@@ -15,6 +15,7 @@ import {
 } from "./constants";
 import { Gondola } from "./Gondola";
 import type { TiltHandle } from "./MonsterRide";
+import { rideAnimationSecondsNow } from "@/simulation/journey/activeRideOps";
 
 /** The arch: leaves the hub, rises over, and comes back down to the spider. */
 const ARCH_CURVE = new CatmullRomCurve3([
@@ -46,10 +47,14 @@ export function Arm({
   const levelRef = useRef<Group>(null);
   const spiderRef = useRef<Group>(null);
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     // Cancel the arm's tilt so the gondola deck stays horizontal.
     if (levelRef.current) levelRef.current.rotation.z = -tiltRef.current;
-    if (spiderRef.current) spiderRef.current.rotation.y += delta * SPIDER_SPIN;
+    /* Off the ride's animation clock, like the hub and the wave, so the spider
+       stops with the rest of the machine and comes home with it. */
+    if (spiderRef.current) {
+      spiderRef.current.rotation.y = SPIDER_SPIN * rideAnimationSecondsNow("monster");
+    }
   });
 
   const tip = useMemo(() => ARCH_CURVE.getPointAt(1).toArray() as [number, number, number], []);

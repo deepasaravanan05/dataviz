@@ -240,9 +240,10 @@ check(
   "matches the animation pattern the rides already use",
 );
 
+/* The Phase-1 proof-of-concept scene (src/components/3d/) has been removed —
+   the journey layer in ParkScene is the employee simulation now. */
 for (const [file, label] of [
   ["src/components/roller-coaster/ParkScene.tsx", "the main park"],
-  ["src/components/3d/Scene.tsx", "the employee simulation"],
 ] as const) {
   const text = readFileSync(join(__dirname, "..", file), "utf8");
   check(

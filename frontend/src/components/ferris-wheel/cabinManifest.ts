@@ -11,7 +11,7 @@ export const CABIN_COLOR_HEX: Record<SeatColor, string> = {
 /** Repeating Green -> Yellow -> Red so colors never clump (§6). */
 const PATTERN: SeatColor[] = ["GREEN", "YELLOW", "RED"];
 
-/** 60 cabins over 360 degrees = exactly 6 degrees of separation (§7). */
+/** 40 cabins over 360 degrees = exactly 9 degrees of separation. */
 export const ANGLE_STEP = (Math.PI * 2) / CABIN_COUNT;
 
 /** Cabins hang just inside the outer rim so the arm meets the rim (§8). */
@@ -26,8 +26,9 @@ export interface CabinSpec {
 }
 
 /**
- * The single source of truth for all 60 cabins. Positions are computed
- * mathematically from the index — never hand-placed or randomized (§7).
+ * The single source of truth for all 40 cabins. Positions are computed
+ * mathematically from the index — never hand-placed or randomized (§7), so
+ * changing CABIN_COUNT re-spaces the ring evenly and nothing else has to move.
  */
 export const CABINS: CabinSpec[] = Array.from({ length: CABIN_COUNT }, (_, index) => {
   const angle = index * ANGLE_STEP;
@@ -43,7 +44,7 @@ export function countByColor(color: SeatColor): number {
   return CABINS.filter((c) => c.color === color).length;
 }
 
-/** Dev-time validation of the non-negotiable counts (§4, §29). */
+/** Dev-time validation of the cabin count and its even colour allocation. */
 export function validateCabins(): void {
   const green = countByColor("GREEN");
   const yellow = countByColor("YELLOW");
@@ -53,11 +54,16 @@ export function validateCabins(): void {
     CABINS.length === CABIN_COUNT,
     `Expected exactly ${CABIN_COUNT} cabins, found ${CABINS.length}`,
   );
-  console.assert(green === 20, `Expected 20 green cabins, found ${green}`);
-  console.assert(yellow === 20, `Expected 20 yellow cabins, found ${yellow}`);
-  console.assert(red === 20, `Expected 20 red cabins, found ${red}`);
+  console.assert(
+    CABIN_COUNT >= 30 && CABIN_COUNT <= 40,
+    `A ride must carry 30-40 seats, this one carries ${CABIN_COUNT}`,
+  );
   console.assert(
     green + yellow + red === CABIN_COUNT,
     `Color totals ${green + yellow + red} do not sum to ${CABIN_COUNT}`,
+  );
+  console.assert(
+    Math.max(green, yellow, red) - Math.min(green, yellow, red) <= 1,
+    `The three allocation bands are uneven: ${green} / ${yellow} / ${red}`,
   );
 }

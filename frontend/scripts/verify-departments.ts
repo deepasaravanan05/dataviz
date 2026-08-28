@@ -31,15 +31,14 @@ const layout = read("src", "app", "layout.tsx");
 
 // ============ 1. The mapping covers the dataset, over the real rides ============
 /*
- * The dataset carries SEVEN departments and the park has five rides. The
- * user's standing instruction: employees whose department has no ride of its
- * own are converted to existing rides — never to new destinations. So every
- * dataset department must resolve to a real ride, some rides serve two
- * departments, and no invented department (DEVOPS had zero employees in this
- * dataset) may survive anywhere.
+ * The attendance roster carries SIX departments and the park has five rides.
+ * The user's standing instruction: employees whose department has no ride of
+ * its own are converted to existing rides — never to new destinations. So
+ * every dataset department must resolve to a real ride, the Ferris Wheel
+ * serves two, and no invented department may survive anywhere.
  */
 check("exactly five department rides", RIDE_DEPARTMENTS.length === 5, `${RIDE_DEPARTMENTS.length}`);
-check("exactly seven departments", DEPARTMENTS.length === 7, `${DEPARTMENTS.length}`);
+check("exactly six departments", DEPARTMENTS.length === 6, `${DEPARTMENTS.length}`);
 for (const d of DATASET_DEPARTMENTS) {
   check(`${d} is mapped to a ride`, DEPARTMENTS.some((r) => r.department === d), d);
 }
@@ -59,32 +58,42 @@ check(
   RIDE_DEPARTMENTS.map((r) => `${r.rideId}:${r.departments.length}`).join(", "),
 );
 check(
-  "DEVOPS is gone — it has no employees in the dataset",
-  DEPARTMENTS.every((d) => d.department !== "DEVOPS"),
-  "no DEVOPS entry",
+  "departments the roster dropped are gone — no DEVOPS, Finance or Operations",
+  ["DEVOPS", "Finance", "Operations"].every((gone) =>
+    DEPARTMENTS.every((d) => d.department !== gone),
+  ),
+  "only the six departments the attendance sheet names",
 );
 
 // The pairings, using this park's actual ride names.
 const EXPECTED: [string, string][] = [
   ["Tech", "Roller Coaster"],
   ["Cyber Security", "Dragon Ride"],
-  ["Finance", "Ferris Wheel"],
   ["Data Engineering", "Drop Tower"],
   ["ERP", "Monster Ride"],
   ["IT Support", "Ferris Wheel"],
-  ["Operations", "Monster Ride"],
+  ["UI/UX", "Ferris Wheel"],
 ];
 for (const [dept, ride] of EXPECTED) {
   const found = rideForDepartment(dept);
   check(`${dept} -> ${ride}`, found.rideName === ride, `${dept} -> ${found.rideName}`);
 }
 check(
-  "shared rides announce BOTH their departments",
-  departmentFor("ferris").department.includes("Finance") &&
-    departmentFor("ferris").department.includes("IT Support") &&
-    departmentFor("monster").department.includes("ERP") &&
-    departmentFor("monster").department.includes("Operations"),
+  "every EXPECTED pairing is checked — the table covers the whole roster",
+  EXPECTED.length === DEPARTMENTS.length &&
+    EXPECTED.every(([d]) => DATASET_DEPARTMENTS.includes(d)),
+  `${EXPECTED.length} pairings for ${DEPARTMENTS.length} departments`,
+);
+check(
+  "the shared ride announces BOTH its departments",
+  departmentFor("ferris").department.includes("IT Support") &&
+    departmentFor("ferris").department.includes("UI/UX"),
   `ferris: "${departmentFor("ferris").department}", monster: "${departmentFor("monster").department}"`,
+);
+check(
+  "no ride was added or renamed to fit the new roster",
+  RIDE_DEPARTMENTS.map((r) => r.rideId).join(",") === "coaster,dragon,ferris,tower,monster",
+  RIDE_DEPARTMENTS.map((r) => `${r.rideId}=${r.rideName}`).join(", "),
 );
 
 // ============ 2. Ride names come from the park, not retyped ============
@@ -167,20 +176,36 @@ check(
   /w-\[min\(20rem,calc\(100vw-2rem\)\)\]/.test(panel),
   "width clamps to the viewport",
 );
+/*
+ * These three used to pin the panel's original two-field layout: a `text-3xl`
+ * department heading, a "Department" label, a "Ride" label, and a close button
+ * whose aria-label read "Close department panel". That layout has been
+ * replaced by the work-start summary at the user's request, so pinning it
+ * would only assert that a superseded design survived. What each check was
+ * really protecting is asserted instead: one prominent header carrying both
+ * names, every figure labelled in words rather than by position or colour, and
+ * a close button a screen reader can announce.
+ *
+ * The panel's own arithmetic — the counts, the filter and the ordering — is
+ * swept across every ride and every minute of the day in verify-ride-panel.ts.
+ */
 check(
-  "the department name is the most prominent text",
-  /text-3xl[\s\S]*?\{department\}/.test(panel),
-  "department rendered at the largest size",
+  "the ride and its department share one prominent header line",
+  /<h2[\s\S]*?\{rideName\}[\s\S]{0,240}\{department\}[\s\S]*?<\/h2>/.test(panel) &&
+    (panel.match(/<h2/g) ?? []).length === 1,
+  "one heading holds both names, separated inline",
 );
 check("the ride name is shown too", /\{rideName\}/.test(panel), "ride name present");
 check(
   "information is conveyed as text, not colour alone",
-  />\s*Department\s*</.test(panel) && />\s*Ride\s*</.test(panel),
-  "both fields are labelled in words",
+  /Total employees/.test(panel) &&
+    /Actual work start/.test(panel) &&
+    /Actual work start members/.test(panel),
+  "every count and the list are labelled in words",
 );
 check(
   "the close button has an accessible label",
-  /aria-label="Close department panel"/.test(panel),
+  /aria-label="Close [a-z ]*panel"/.test(panel),
   "labelled for screen readers",
 );
 check(
@@ -279,10 +304,24 @@ check(
     !/from "[^"]*rideSelectionStore"/.test(read("src", "store", "simulationStore.ts")),
   "clock, employees, queues and dispatch live in a store neither side imports",
 );
+/*
+ * This used to forbid the panel from mentioning the clock or the employees at
+ * all, which was the simplest way to guarantee it could not disturb them while
+ * it showed nothing but two names. It now has to show how many of a department
+ * have started work, so it necessarily READS both.
+ *
+ * The property that actually matters is unchanged and is asserted directly: it
+ * may read, and it may not write. No clock mutator, no roster mutator, and no
+ * reference to the rides' own simulation store — so no ride, no employee and
+ * no minute can be moved from here however the panel is used.
+ */
 check(
-  "the panel cannot reach the simulation",
-  !/useSimulationStore|simTime|employees/.test(panel),
-  "it only reads the selection store",
+  "the panel reads the simulation but cannot change it",
+  !/useSimulationStore/.test(panel) &&
+    !/seekJourneyClock|setJourneyPaused|setJourneySpeed|advanceJourneyClock|resetJourneyClock|setSimTime|activateJourney/.test(
+      panel,
+    ),
+  "it subscribes to the published minute and the active roster, and imports no mutator for either",
 );
 
 // ============ 9. ADD-ONLY ============

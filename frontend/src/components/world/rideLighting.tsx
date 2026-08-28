@@ -12,6 +12,7 @@ import {
   BASE_WIDTH,
 } from "@/components/ferris-wheel/constants";
 import { TRACK_CURVE as COASTER_CURVE } from "@/components/roller-coaster/trackCurve";
+import { COASTER_ORIGIN } from "@/components/roller-coaster/constants";
 import {
   TOWER_HEIGHT as MONSTER_TOWER,
   ARM_ATTACH_HEIGHT,
@@ -49,42 +50,65 @@ import type { DepartmentRideId } from "@/components/park/departments";
  * leaving a mark.
  *
  * Every ride gets its own palette and its own animation, because the whole
- * point is that you can tell which is which from a kilometre up.
+ * point is that you can tell which is which from a kilometre up. No strip in
+ * any rig carries a colour from outside its own ride's pair any more — the
+ * white leg wash, the blue aprons, the red crown beacon and the amber swing arc
+ * were all leftovers that made two rides share a colour at a distance.
  */
 
 /*
- * The six palettes.
+ * The six palettes — ONE PER RIDE, ASSIGNED BY THE USER.
  *
- * Spread deliberately around the colour wheel rather than picked by taste: the
- * closest pair is 33 degrees apart, which is what makes them tell apart from a
- * kilometre up where a ride is only a smear of light. An earlier pass had the
- * drop tower and the railway 13 degrees apart and they read as the same ride.
- * verify-night.ts measures the separation in HSL and fails if any pair closes up.
+ * The scheme is the one the brief names, ride for ride:
+ *
+ *     Ferris Wheel ....... blue + cyan
+ *     Drop Tower ......... purple + violet
+ *     Dragon Ride ........ red + orange
+ *     Roller Coaster ..... blue + magenta
+ *     Monster Ride ....... green + teal
+ *     Park Railway ....... amber + gold   (the sixth ride, unique to it)
+ *
+ * WHAT THE ACCENT IS FOR. Each entry's `accent` is the colour that ride reads
+ * as from a kilometre up, where an attraction is only a smear of light, and no
+ * two may close up on the hue wheel — verify-night.ts measures the separation
+ * in HSL and fails if any pair comes within 18 degrees. Two of the assignments
+ * name blue for two different rides, so the accent is taken from the OTHER half
+ * of each of those pairs: the Ferris Wheel is identified by its cyan and the
+ * coaster by its magenta, while both still run blue through their structures
+ * exactly as asked. That is what lets the scheme be followed literally without
+ * two rides becoming the same ride from the overview.
+ *
+ * NOTHING HERE PAINTS A RIDE. These are emissive LED strips rendered as
+ * siblings inside each ride's own transform; every ride keeps its own model
+ * colours — the coaster's mustard cars and teal spine, the tower's yellow
+ * lattice, the dragon's white A-frame — and removing the rigs would leave no
+ * mark on any of them.
  */
 export const RIDE_LOOK: Record<string, { look: LedLook; accent: string; label: string }> = {
-  // TECH — electric magenta running the rails, violet in the structure.
+  // TECH — blue running the rails, breaking to magenta on the crest.
   coaster: {
-    look: { colorA: "#ff2fa4", colorB: "#7b3ff2", speed: 0.32, cycles: 3, base: 0.55, gain: 1.7 },
+    look: { colorA: "#2b6bff", colorB: "#ff2fa4", speed: 0.32, cycles: 3, base: 0.55, gain: 1.7 },
+    /* Magenta, not the blue: the Ferris Wheel is the ride identified by blue. */
     accent: "#ff2fa4",
-    label: "magenta / violet",
+    label: "blue / magenta",
   },
-  // FINANCE — a gold rim with a slow wave into rose around the wheel.
+  // IT SUPPORT · UI/UX — a deep blue rim washing to cyan around the wheel.
   ferris: {
-    look: { colorA: "#ffcc33", colorB: "#ff5f8f", speed: 0.14, cycles: 2, base: 0.7, gain: 1.1 },
-    accent: "#ffcc33",
-    label: "gold / rose",
+    look: { colorA: "#1f4fe0", colorB: "#22e8ff", speed: 0.14, cycles: 2, base: 0.7, gain: 1.1 },
+    accent: "#22e8ff",
+    label: "blue / cyan",
   },
-  // DEVOPS — a cold vertical spine, the pulse climbing the mast then dropping.
+  // DATA ENGINEERING — purple in the mast, the pulse climbing it into violet.
   tower: {
-    look: { colorA: "#22c8ff", colorB: "#ffffff", speed: 0.5, cycles: 1, base: 0.45, gain: 2.2 },
-    accent: "#22c8ff",
-    label: "cyan / white",
+    look: { colorA: "#8b2fe0", colorB: "#c77bff", speed: 0.5, cycles: 1, base: 0.45, gain: 2.2 },
+    accent: "#a855f7",
+    label: "purple / violet",
   },
-  // CYBER — warm ember, the swing arc picked out in amber and deep red.
+  // CYBER SECURITY — red through the A-frame, orange along the swing arc.
   dragon: {
-    look: { colorA: "#ff5a2b", colorB: "#d21f2b", speed: 0.2, cycles: 2, base: 0.62, gain: 1.4 },
-    accent: "#ff5a2b",
-    label: "ember / red",
+    look: { colorA: "#e01b1b", colorB: "#ff8a1f", speed: 0.2, cycles: 2, base: 0.62, gain: 1.4 },
+    accent: "#f2431f",
+    label: "red / orange",
   },
   // ERP — green-teal, sweeping with the ride's own arms.
   monster: {
@@ -92,11 +116,11 @@ export const RIDE_LOOK: Record<string, { look: LedLook; accent: string; label: s
     accent: "#22e07a",
     label: "green / teal",
   },
-  // The railway that rings the park — indigo running the whole loop.
+  // The railway that rings the park — warm amber and gold, the whole loop.
   train: {
-    look: { colorA: "#7a6bff", colorB: "#3b8cff", speed: 0.06, cycles: 9, base: 0.35, gain: 1.9 },
-    accent: "#7a6bff",
-    label: "indigo / blue",
+    look: { colorA: "#ffb020", colorB: "#ffe07a", speed: 0.06, cycles: 9, base: 0.35, gain: 1.9 },
+    accent: "#ffb020",
+    label: "amber / gold",
   },
 };
 
@@ -147,7 +171,9 @@ function FerrisRig() {
       <LedStrip points={rim} look={look} size={0.26} />
       <LedStrip points={inner} look={{ ...look, base: 0.4, gain: 0.8 }} size={0.16} />
       <LedStrip points={spokes} look={{ ...look, cycles: 4, base: 0.3, gain: 1.4 }} size={0.13} halo={false} />
-      <LedStrip points={legs} look={{ ...look, colorB: "#ffffff", base: 0.5, gain: 0.7 }} size={0.14} halo={false} />
+      {/* The legs stay inside the wheel's own blue rather than washing to white,
+          so nothing on this ride lights in a colour it was not assigned. */}
+      <LedStrip points={legs} look={{ ...look, colorB: look.colorA, base: 0.5, gain: 0.7 }} size={0.14} halo={false} />
       {/* Ground ring around the boarding area. */}
       <LedStrip points={ringPoints(BASE_WIDTH * 0.62, 40, 0.2)} look={{ ...look, base: 0.35, gain: 1.1 }} size={0.15} />
     </group>
@@ -168,12 +194,22 @@ function CoasterRig() {
       return new THREE.Vector3(p.x, 0.2, p.z);
     });
   }, []);
+  /*
+   * The rig must sit on the ride, not beside it. RollerCoaster renders its
+   * geometry inside <group position={COASTER_ORIGIN}>, while TRACK_CURVE is
+   * authored in the ride's own local space (its points centre on x=2.4). Without
+   * this offset the LEDs drew a second, empty coaster 50u to the left — 100u in
+   * world space at the current park scale. The DropTower, Dragon and Monster
+   * rigs already offset by their rides' origins the same way.
+   */
   return (
-    <group>
+    <group position={[COASTER_ORIGIN[0], 0, COASTER_ORIGIN[2]]}>
       <LedStrip points={rails} look={look} size={0.2} haloScale={3.8} />
+      {/* The apron line runs the coaster's own blue-to-magenta, not a colour of
+          its own — the ride has one identity and every strip on it shares it. */}
       <LedStrip
         points={groundLine}
-        look={{ ...look, colorB: "#2b7cff", base: 0.3, gain: 1.2, cycles: 5 }}
+        look={{ ...look, base: 0.3, gain: 1.2, cycles: 5 }}
         size={0.16}
       />
     </group>
@@ -206,9 +242,11 @@ function DropTowerRig() {
     <group position={[TOWER_ORIGIN[0], 0, TOWER_ORIGIN[2]]}>
       {/* Phase runs 0 at the base to 1 at the top on each corner, so the pulse climbs. */}
       <LedStrip points={spines} look={{ ...look, cycles: 4 }} size={0.3} haloScale={4.2} />
-      <LedStrip points={beacon} look={{ ...look, colorA: "#ff3b3b", colorB: "#ff9d3b", speed: 0.8, base: 0.5, gain: 2 }} size={0.42} />
+      {/* Crown beacon: the tower's own violet at its brightest, pulsing fast.
+          It used to flash red and amber, which is the Dragon Ride's assignment. */}
+      <LedStrip points={beacon} look={{ ...look, colorA: look.colorB, colorB: "#ffffff", speed: 0.8, base: 0.5, gain: 2 }} size={0.42} />
       <LedStrip points={deck} look={{ ...look, base: 0.5, gain: 0.9, cycles: 6 }} size={0.22} />
-      <LedStrip points={apron} look={{ ...look, colorB: "#2b7cff", base: 0.3, gain: 1 }} size={0.2} />
+      <LedStrip points={apron} look={{ ...look, base: 0.3, gain: 1 }} size={0.2} />
     </group>
   );
 }
@@ -247,7 +285,8 @@ function DragonRig() {
   return (
     <group position={[ox, 0, oz]}>
       <LedStrip points={frame} look={{ ...look, cycles: 3 }} size={0.24} />
-      <LedStrip points={arc} look={{ ...look, colorB: "#ffd166", speed: 0.34, cycles: 1, base: 0.5, gain: 2 }} size={0.28} haloScale={4} />
+      {/* The swing arc, chasing along the dragon's own red-to-orange. */}
+      <LedStrip points={arc} look={{ ...look, speed: 0.34, cycles: 1, base: 0.5, gain: 2 }} size={0.28} haloScale={4} />
       <LedStrip points={apron} look={{ ...look, base: 0.32, gain: 1 }} size={0.2} />
     </group>
   );
@@ -266,7 +305,7 @@ function MonsterRig() {
   return (
     <group position={[ox, 0, oz]}>
       <LedStrip points={mast} look={{ ...look, cycles: 2 }} size={0.26} />
-      <LedStrip points={hub} look={{ ...look, colorB: "#ffffff", base: 0.6, gain: 1.4 }} size={0.2} />
+      <LedStrip points={hub} look={{ ...look, base: 0.6, gain: 1.4 }} size={0.2} />
       <LedStrip points={sweep} look={{ ...look, cycles: 5, base: 0.4, gain: 1.8 }} size={0.22} haloScale={4} />
       <LedStrip points={apron} look={{ ...look, base: 0.3, gain: 1 }} size={0.2} />
     </group>

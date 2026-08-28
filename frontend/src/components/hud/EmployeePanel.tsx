@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import {
   CHECK_IN_BAND_LABEL,
   CHECK_IN_COLOR_HEX,
-  EMPLOYEE_BY_ID,
   PHASE_LABEL,
   sampleJourney,
   timeOrDash,
   type JourneyEmployee,
 } from "@/simulation/journey/journey";
+import { useActiveJourneyStore } from "@/simulation/journey/activeJourney";
 import { formatSimTime } from "@/simulation/clock";
 import { useJourneyStore } from "@/store/journeyStore";
 import { useCameraStore } from "@/store/cameraStore";
@@ -29,7 +29,7 @@ export function EmployeePanel() {
   const selectedId = useJourneyStore((s) => s.selectedId);
   const clear = useJourneyStore((s) => s.clear);
 
-  const employee = selectedId ? EMPLOYEE_BY_ID[selectedId] : undefined;
+  const employee = useActiveJourneyStore((s) => (selectedId ? s.byId[selectedId] : undefined));
   if (!employee) return null;
 
   // Keyed by employee, so switching people replays the entrance animation and

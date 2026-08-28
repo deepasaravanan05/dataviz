@@ -76,12 +76,6 @@ export default function RollerCoasterPage() {
           Monster Ride
         </Link>
         <Link
-          href="/ferris-wheel"
-          className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
-        >
-          Ferris Wheel
-        </Link>
-        <Link
           href="/"
           className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
         >

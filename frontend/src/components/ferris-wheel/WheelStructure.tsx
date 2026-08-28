@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Beam } from "./Beam";
+import { RIDE_PAINT } from "@/world/ridePaint";
 import { polar, segment, type Segment2D } from "./geometry";
 import {
   AXLE_LENGTH,
@@ -20,9 +21,11 @@ import {
   WHEEL_RADIUS,
 } from "./constants";
 
-const STEEL = "#9aa1ab";
-const STEEL_MID = "#7d848f";
-const STEEL_DARK = "#5d636d";
+/* Painted steel — the wheel is the park's blue ride. Cabins, hub bearings
+   and the concrete pad are not painted; see world/ridePaint.ts. */
+const STEEL = RIDE_PAINT.ferris.light;
+const STEEL_MID = RIDE_PAINT.ferris.mid;
+const STEEL_DARK = RIDE_PAINT.ferris.dark;
 
 /** One ring, doubled on both truss planes so it reads as a 3D structure. */
 function TrussRing({
@@ -135,7 +138,7 @@ export function WheelStructure() {
       </mesh>
       <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
         <cylinderGeometry args={[AXLE_RADIUS, AXLE_RADIUS, AXLE_LENGTH, 20]} />
-        <meshStandardMaterial color="#454a52" metalness={0.92} roughness={0.2} />
+        <meshStandardMaterial color={STEEL_DARK} metalness={0.92} roughness={0.2} />
       </mesh>
 
       {/* Hub flange bolts, for mechanical detail */}
@@ -145,7 +148,7 @@ export function WheelStructure() {
         return (
           <mesh key={`bolt-${i}`} position={[x, y, HUB_DEPTH / 2 + 0.03]} rotation={[Math.PI / 2, 0, 0]}>
             <cylinderGeometry args={[0.08, 0.08, 0.1, 6]} />
-            <meshStandardMaterial color="#3c4149" metalness={0.9} roughness={0.3} />
+            <meshStandardMaterial color={STEEL_DARK} metalness={0.9} roughness={0.3} />
           </mesh>
         );
       })}

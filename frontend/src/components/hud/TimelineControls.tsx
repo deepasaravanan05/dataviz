@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LOOP_END, LOOP_START } from "@/simulation/journey/journey";
+import { useActiveJourneyStore } from "@/simulation/journey/activeJourney";
 import { SPEED_OPTIONS } from "@/simulation/journey/clock";
 import { formatSimTime } from "@/simulation/clock";
 import { useJourneyStore } from "@/store/journeyStore";
@@ -11,13 +11,20 @@ import { useJourneyStore } from "@/store/journeyStore";
  *
  * Ordinary DOM, like the other panels. Scrubbing is a straight seek on the
  * clock: because every figure's position is a pure function of the simulated
- * time, jumping to 9:47 puts all fifty-six people exactly where they were at
+ * time, jumping to 9:47 puts every one of them exactly where they were at
  * 9:47, with nothing to replay or rewind.
  *
  * A native range input carries the scrubber, so arrow keys, Home and End work
  * without any extra handling.
  */
 export function TimelineControls() {
+  /*
+   * The slider spans the ACTIVE roster's day — kept under the constants'
+   * traditional names so `min={LOOP_START}` / `max={LOOP_END}` below read
+   * (and verify) the same as always, while re-rendering on a roster swap.
+   */
+  const LOOP_START = useActiveJourneyStore((s) => s.loopStart);
+  const LOOP_END = useActiveJourneyStore((s) => s.loopEnd);
   const simTime = useJourneyStore((s) => s.simTime);
   const paused = useJourneyStore((s) => s.paused);
   const speed = useJourneyStore((s) => s.speed);

@@ -1,54 +1,48 @@
 "use client";
 
-import Link from "next/link";
 import { ParkScene } from "@/components/roller-coaster/ParkScene";
-import { JourneyHud } from "@/components/hud/JourneyHud";
-import { TimelineControls } from "@/components/hud/TimelineControls";
 import { PlaceNav } from "@/components/hud/PlaceNav";
-import { EMPLOYEE_COUNT, GATE_X, GATE_Z } from "@/simulation/journey/constants";
+import { TimelineControls } from "@/components/hud/TimelineControls";
+import { EntranceDashboard } from "@/components/entrance/EntranceDashboard";
+import { EmployeeDataUpload } from "@/components/entrance/EmployeeDataUpload";
+import { SkyThemeButton } from "@/components/world/SkyThemeButton";
+import {
+  ENTRANCE_CAMERA_POSITION,
+  ENTRANCE_CAMERA_TARGET,
+  ENTRANCE_FOV,
+} from "@/components/world/entranceView";
 
-/** Framed on the main entrance, where every employee checks in. */
-const CAMERA_POSITION: [number, number, number] = [GATE_X + 46, 78, GATE_Z + 215];
-const CAMERA_TARGET: [number, number, number] = [GATE_X, 22, GATE_Z - 40];
+/*
+ * The framing lives in `entranceView.ts` so the verification suite can project
+ * the roster through this exact camera and prove the employees are on screen.
+ */
 
 export default function EntrancePage() {
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#03050b]">
-      <ParkScene cameraPosition={CAMERA_POSITION} cameraTarget={CAMERA_TARGET} />
+      <ParkScene
+        cameraPosition={ENTRANCE_CAMERA_POSITION}
+        cameraTarget={ENTRANCE_CAMERA_TARGET}
+        cameraFov={ENTRANCE_FOV}
+      />
 
-      <div className="pointer-events-none absolute left-4 top-16 rounded-xl bg-[#070b14]/82 px-4 py-3 text-white shadow-lg backdrop-blur">
-        <div className="text-sm font-semibold tracking-wide">MAIN ENTRANCE</div>
-        <div className="mt-0.5 text-2xl font-bold tabular-nums">{EMPLOYEE_COUNT} EMPLOYEES</div>
-        <div className="mt-1 max-w-[15rem] text-xs text-white/60">
-          One gate for the whole workforce. Arrival time decides the colour; the colour travels
-          with the employee all the way to their department ride.
-        </div>
-      </div>
-
-      <JourneyHud />
+      <PlaceNav showDashboardLink={false} />
+      {/*
+        The clock the whole visualisation runs on, on the main page at last:
+        without it a visitor lands mid-day, when everyone is already standing
+        at their ride, and concludes the park is empty. Play, pause, speed and
+        the scrubber reach the arrival hour in one drag.
+      */}
       <TimelineControls />
-      <PlaceNav />
+      <EntranceDashboard />
+      <SkyThemeButton />
 
-      <div className="pointer-events-auto absolute right-4 top-16 flex flex-wrap justify-end gap-2">
-        <Link
-          href="/dashboard"
-          className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
-        >
-          Dashboard
-        </Link>
-        <Link
-          href="/roller-coaster"
-          className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
-        >
-          Full park →
-        </Link>
-        <Link
-          href="/"
-          className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
-        >
-          ← Theme Park
-        </Link>
-      </div>
+      {/*
+        The top-right corner. The "Full park" and "Theme Park" links that stood
+        here are gone — the fast-travel bar along the top already reaches every
+        part of the park — and the single employee-data upload takes their slot.
+      */}
+      <EmployeeDataUpload />
     </main>
   );
 }

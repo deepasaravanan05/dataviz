@@ -1,3 +1,5 @@
+import { RIDE_PAINT } from "@/world/ridePaint";
+
 /**
  * Dimensions and palette for the Giant Drop Tower.
  *
@@ -16,16 +18,17 @@
  * height of the tower.
  */
 import { TOWER_CENTER } from "@/components/park/layout";
+import { RIDE_SEAT_SCALE, loweredSeatMount } from "@/world/scale";
 
 export const PALETTE = {
-  /** Yellow painted steel lattice. */
-  towerSteel: "#f2c21a",
-  towerSteelDark: "#c29612",
-  towerBrace: "#e0b018",
-  guideRail: "#9aa1aa",
-  /** Red gondola structure. */
-  spider: "#c42b24",
-  spiderDark: "#8f1f1a",
+  /** Painted steel lattice — the tower is the park's purple ride. */
+  towerSteel: RIDE_PAINT.tower.light,
+  towerSteelDark: RIDE_PAINT.tower.dark,
+  towerBrace: RIDE_PAINT.tower.mid,
+  guideRail: RIDE_PAINT.tower.mid,
+  /** Gondola structure, painted with the tower it rides on. */
+  spider: RIDE_PAINT.tower.light,
+  spiderDark: RIDE_PAINT.tower.dark,
   /** Navy seats. */
   seatShell: "#2c4a7c",
   seatShellDark: "#1e3557",
@@ -34,11 +37,11 @@ export const PALETTE = {
   restraintPad: "#3a3d42",
   footrest: "#3a3d42",
   /** Canopy. */
-  canopy: "#1c2b4a",
-  canopyEdge: "#c42b24",
+  canopy: RIDE_PAINT.tower.dark,
+  canopyEdge: RIDE_PAINT.tower.light,
   /** Machinery, foundations, riders. */
-  machinery: "#4a4f55",
-  cable: "#6f757c",
+  machinery: RIDE_PAINT.tower.dark,
+  cable: RIDE_PAINT.tower.dark,
   foundation: "#b0aca4",
   shirt: "#3b82f6",
   skin: "#f1c27d",
@@ -88,7 +91,7 @@ export const BRACE_RADIUS = 0.15;
 export const BAY_HEIGHT = 3.875;
 export const BAY_COUNT = Math.round(TOWER_HEIGHT / BAY_HEIGHT);
 
-export const FOUNDATION_RADIUS = 7.0;
+export { FOUNDATION_RADIUS } from "./gondolaBreadth";
 export const FOUNDATION_HEIGHT = 1.2;
 /** Splayed buttress legs at the base. */
 export const BUTTRESS_SPREAD = 6.2;
@@ -109,35 +112,67 @@ export const GONDOLA_BOTTOM_Y = 2.9;
 export const GONDOLA_TOP_Y = 80;
 export const DROP_HEIGHT = GONDOLA_TOP_Y - GONDOLA_BOTTOM_Y;
 
-/** Boarding deck: an annulus around the mast, clear of the foundation. */
-export const STATION_DECK_Y = 1.9;
-export const STATION_INNER_R = 7.2;
-export const STATION_OUTER_R = 11.8;
+/**
+ * The gondola's breadth, the boarding deck that follows it, and the ride's
+ * footprint all live in `gondolaBreadth.ts` — a leaf module, so `park/layout.ts`
+ * can read the footprint without importing this file, which imports the layout
+ * back for the tower's solved centre. Re-exported here so every drawing module
+ * keeps its existing import.
+ */
+export {
+  GONDOLA_BREADTH_SCALE,
+  COLLAR_INNER_R,
+  COLLAR_OUTER_R,
+  INNER_HOOP_R,
+  OUTER_HOOP_R,
+  SEAT_RING_R,
+  FOOTREST_R,
+  CANOPY_R,
+  STATION_INNER_R,
+  STATION_OUTER_R,
+} from "./gondolaBreadth";
 
-/** Inner collar clears the tower's diagonal (TOWER_HALF * sqrt(2) = 2.97). */
-export const COLLAR_INNER_R = 3.5;
-export const COLLAR_OUTER_R = 4.6;
-/** Structural hoops of the red spider. */
-export const INNER_HOOP_R = 6.2;
-export const OUTER_HOOP_R = 9.9;
-/** Radius of the seat centres. */
-export const SEAT_RING_R = 9.0;
-export const FOOTREST_R = 10.3;
-export const CANOPY_R = 11.2;
+export const STATION_DECK_Y = 1.9;
 export const CANOPY_Y = 3.6;
 /** Radial arms of the spider, each carrying two seats. */
-export const ARM_COUNT = 30;
+export const ARM_COUNT = 20;
 
 /** ---------------- Seats ---------------- */
 /**
- * 60 individual outward-facing seats in one ring, matching the reference's
- * single circular deck. At SEAT_RING_R the arc spacing is 2*PI*9/60 = 0.94u,
- * which comfortably fits a 0.82u-wide seat with a gap between neighbours, so
- * every seat stays individually identifiable.
+ * 40 individual outward-facing seats in one ring, matching the reference's
+ * single circular deck.
+ *
+ * FORTY, DOWN FROM SIXTY, to meet the user's 30-40 capacity for every ride —
+ * and the ring is better for it. At SEAT_RING_R the arc spacing is now
+ * 2*PI*9/40 = 1.41u against a 0.82u seat, where at sixty it was 0.94u and the
+ * drawn seats (which are scaled up for the people who sit in them) ran into one
+ * another. The gondola, the spider, the canopy and the mast are untouched; the
+ * ring simply carries twenty pairs instead of thirty, one pair per spider arm,
+ * so every seat is still bolted to a real radial arm.
  */
-export const SEAT_COUNT = 60;
+export const SEAT_COUNT = 40;
 export const SEAT_WIDTH = 0.82;
 export const SEAT_ANGLE_STEP = (Math.PI * 2) / SEAT_COUNT;
+
+/**
+ * WHERE A RIDER ACTUALLY SITS, and the one place that decides it.
+ *
+ * `Gondola.tsx` draws the seat and `rideKinematics.ts` places the employee in
+ * it; both read these, so the two can never disagree about where the pan is.
+ *
+ * SEAT_SURFACE_Y is the top of the pan, lowered by SEAT_LOWER_FRACTION of its
+ * rise above the footrest plate a rider's feet stand on — the 10-15% the user
+ * asked for, taken out of the seat and not out of the ride. The mast, the
+ * gondola's travel, the station deck and the 105 m crown are all unchanged.
+ */
+/** Footrest plate: the floor of this vehicle, on the gondola's own plane. */
+const FOOTREST_Y = -0.45;
+/** Half the 0.14-deep pan: the pan top, in the seat's own unscaled frame. */
+export const SEAT_PAN_TOP_LOCAL = 0.07;
+const SEAT_RISE = SEAT_PAN_TOP_LOCAL * RIDE_SEAT_SCALE - FOOTREST_Y;
+export const SEAT_SURFACE_Y = FOOTREST_Y + loweredSeatMount(SEAT_RISE);
+/** Where the seat GROUP is mounted so its pan top lands on SEAT_SURFACE_Y. */
+export const SEAT_MOUNT_Y = SEAT_SURFACE_Y - SEAT_PAN_TOP_LOCAL * RIDE_SEAT_SCALE;
 
 /** ---------------- Motion ---------------- */
 /**
@@ -182,4 +217,5 @@ export const RESTRAINT_TRAVEL = (62 * Math.PI) / 180;
  * Worst-case horizontal footprint, used for park-placement checks. Re-derived
  * from the real geometry in verify-drop-tower.ts rather than trusted here.
  */
-export const RIDE_REACH = 12;
+/** Overall horizontal reach, used for clearance checks against other rides. */
+export { TOWER_REACH as RIDE_REACH } from "./gondolaBreadth";

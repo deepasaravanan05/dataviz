@@ -33,10 +33,18 @@ validateRiders();
 
 // ---------- Riders ----------
 check("rider count", TRAIN_RIDERS.length === RIDER_COUNT, `${TRAIN_RIDERS.length}`);
+/*
+ * THE CAPACITY RULE IS NOW 30-40 SEATS PER RIDE, 40 PREFERRED, and it applies
+ * to the railway as much as to the five department rides. The train reaches 40
+ * WITHOUT growing: still four open cars behind one engine, each the same
+ * CAR_WIDTH by CAR_LENGTH, now carrying two bench rows of five instead of one.
+ * The consist length, the loop, the gauge and the speed are all unchanged, and
+ * the checks further down re-prove the loop's clearances at the new count.
+ */
 check(
-  "20 total seats (4 cars x 5 seats), per the requested open-view spec",
-  RIDER_COUNT === 20,
-  `${CARRIAGE_COUNT}x${SEATS_PER_CARRIAGE}=${RIDER_COUNT}`,
+  "capacity is in the 30-40 band, at the preferred 40",
+  RIDER_COUNT >= 30 && RIDER_COUNT <= 40,
+  `${CARRIAGE_COUNT} cars x ${SEATS_PER_CARRIAGE} seats = ${RIDER_COUNT}`,
 );
 check(
   "carriages x seats matches RIDER_COUNT",

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { LOOP_START } from "@/simulation/journey/journey";
+import { OPENING_MINUTE } from "@/simulation/journey/journey";
 import {
   DEFAULT_SPEED,
   resetJourneyClock,
@@ -45,7 +45,14 @@ interface JourneyState {
 }
 
 export const useJourneyStore = create<JourneyState>((set) => ({
-  simTime: LOOP_START,
+  /*
+   * The same minute the clock module opens on, not the start of the day. The
+   * HUD's copy is published from the frame loop only when the minute changes,
+   * so seeding it with the wrong value leaves the first paint — and, on a
+   * machine slow enough that the first frame takes a while, the whole opening
+   * impression — reading 9:27 over an empty park.
+   */
+  simTime: OPENING_MINUTE,
   paused: false,
   speed: DEFAULT_SPEED,
   selectedId: null,

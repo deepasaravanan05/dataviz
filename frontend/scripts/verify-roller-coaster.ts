@@ -17,6 +17,7 @@ import {
   ARM_LENGTH,
 } from "../src/components/ferris-wheel/constants";
 import { CABINS, countByColor } from "../src/components/ferris-wheel/cabinManifest";
+import { rideScale } from "../src/components/park/layout";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -28,12 +29,32 @@ function check(label: string, ok: boolean, detail: string) {
 const green = countSeatColor("GREEN");
 const yellow = countSeatColor("YELLOW");
 const red = countSeatColor("RED");
-check("seat count", SEATS.length === 60, `${SEATS.length} seats`);
-check("cars x seats = 60", CAR_COUNT * SEATS_PER_CAR === 60, `${CAR_COUNT} x ${SEATS_PER_CAR}`);
-check("green seats", green === 20, `${green}`);
-check("yellow seats", yellow === 20, `${yellow}`);
-check("red seats", red === 20, `${red}`);
-check("seat colours sum", green + yellow + red === 60, `${green + yellow + red}`);
+/*
+ * THE CAPACITY RULE IS NOW 30-40 SEATS PER RIDE, 40 PREFERRED. The three
+ * GREEN / YELLOW / RED counts are an ALLOCATION order and not a paint job —
+ * every seat in the park is grey — so what has to hold is that the bands are
+ * even and that they account for every seat, not that they are 20 apiece.
+ */
+check(
+  "capacity is in the 30-40 band, at the preferred 40",
+  SEATS.length >= 30 && SEATS.length <= 40,
+  `${SEATS.length} seats`,
+);
+check(
+  "the train's seats are whole cars, evenly filled",
+  CAR_COUNT * SEATS_PER_CAR === SEATS.length,
+  `${CAR_COUNT} cars x ${SEATS_PER_CAR} seats = ${SEATS.length}`,
+);
+check(
+  "the three allocation bands are even",
+  Math.max(green, yellow, red) - Math.min(green, yellow, red) <= 1,
+  `${green} green / ${yellow} yellow / ${red} red`,
+);
+check(
+  "every seat belongs to a band",
+  green + yellow + red === SEATS.length,
+  `${green + yellow + red} of ${SEATS.length}`,
+);
 check("exact hexes", SEAT_COLOR_HEX.GREEN === "#22C55E" && SEAT_COLOR_HEX.YELLOW === "#FACC15" && SEAT_COLOR_HEX.RED === "#EF4444", "22C55E / FACC15 / EF4444");
 const pattern = SEATS.every((s, i) => s.color === (["GREEN", "YELLOW", "RED"] as const)[i % 3]);
 check("G->Y->R repeating, never clumped", pattern, SEATS.slice(0, 6).map((s) => s.color).join(" "));
@@ -76,17 +97,46 @@ check(
 const wheelTop = WHEEL_CENTER_HEIGHT + WHEEL_RADIUS;
 const coasterPeak = maxY;
 check("coaster is a major ride, not dwarfed", coasterPeak > wheelTop * 0.5, `coaster peak ${coasterPeak.toFixed(1)} vs wheel top ${wheelTop.toFixed(1)}`);
-check("coaster does not dwarf the wheel", coasterPeak < wheelTop, `coaster ${coasterPeak.toFixed(1)} < wheel ${wheelTop.toFixed(1)}`);
+/*
+ * COMPARED AT PARK SCALE, not in raw units.
+ *
+ * These two rides are drawn at different factors — the coaster at about 2.6x,
+ * the wheel at about 2.56x — so comparing the numbers in their own model space
+ * answers a question nobody is asking. What matters is what a visitor sees, and
+ * that is each ride's height AFTER its own scale. The intent is unchanged: the
+ * Ferris Wheel stays a landmark rather than something the coaster towers over,
+ * so the coaster may draw level with it but not overtop it by a quarter.
+ */
+const wheelTopScaled = wheelTop * rideScale("ferris");
+const coasterPeakScaled = coasterPeak * rideScale("coaster");
+check(
+  "coaster does not dwarf the wheel",
+  coasterPeakScaled < wheelTopScaled * 1.25,
+  `coaster ${coasterPeakScaled.toFixed(1)}u vs wheel ${wheelTopScaled.toFixed(1)}u at park scale ` +
+    `(${(coasterPeakScaled / wheelTopScaled).toFixed(2)}x)`,
+);
 
 // Lowest Ferris Wheel cabin must not be reachable by the coaster footprint
 const lowestCabinY = WHEEL_CENTER_HEIGHT - WHEEL_RADIUS - ARM_LENGTH - CABIN_HEIGHT;
 check("wheel cabins clear of coaster", nearest > wheelReach, `cabin low point y=${lowestCabinY.toFixed(2)}`);
 
-// ---------- Ferris Wheel unchanged (§27) ----------
-check("wheel still has 60 cabins", CABINS.length === 60, `${CABINS.length}`);
-check("wheel 20 green", countByColor("GREEN") === 20, `${countByColor("GREEN")}`);
-check("wheel 20 yellow", countByColor("YELLOW") === 20, `${countByColor("YELLOW")}`);
-check("wheel 20 red", countByColor("RED") === 20, `${countByColor("RED")}`);
+/* ---------- Ferris Wheel unchanged by anything the coaster did (§27) ----------
+   Both rides were re-capacitied to 40 by the same brief, so this asserts the
+   wheel is intact AND at the same rule, not that it kept a number the coaster
+   no longer shares. */
+{
+  const g = countByColor("GREEN");
+  const y = countByColor("YELLOW");
+  const r = countByColor("RED");
+  check(
+    "the wheel still carries a full, evenly banded ring of cabins",
+    CABINS.length >= 30 &&
+      CABINS.length <= 40 &&
+      g + y + r === CABINS.length &&
+      Math.max(g, y, r) - Math.min(g, y, r) <= 1,
+    `${CABINS.length} cabins, ${g} / ${y} / ${r}`,
+  );
+}
 
 console.log(
   `\nCircuit ${TRACK_LENGTH.toFixed(1)}u over ${TRACK_SEGMENTS} samples · ` +

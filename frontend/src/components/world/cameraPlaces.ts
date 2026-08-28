@@ -1,5 +1,5 @@
 import { PARK_CENTER, PARK_LAYOUT, PLAZA_CENTER, rideById } from "@/components/park/layout";
-import { RIDE_DEPARTMENTS } from "@/components/park/departments";
+import { RIDE_DEPARTMENTS, type DepartmentRideId } from "@/components/park/departments";
 import { FOOD_COURT_CENTER, GATE_X, GATE_Z } from "@/simulation/journey/constants";
 
 /**
@@ -88,20 +88,37 @@ places.push({
   lookAt: [GATE_X, 7, GATE_Z - 14],
 });
 
-places.push({
-  id: "plaza",
-  label: "Central plaza",
-  group: "park",
-  position: [PLAZA_CENTER[0] + 26, 40, PLAZA_CENTER[1] + 96],
-  lookAt: [PLAZA_CENTER[0], 6, PLAZA_CENTER[1]],
-});
-
 {
   const f = frame(FOOD_COURT_CENTER, 30, 14, 1.9);
   places.push({ id: "food-court", label: "Food court", group: "facility", ...f });
 }
 
-for (const d of RIDE_DEPARTMENTS) {
+/**
+ * The order the department chips read in along the nav bar.
+ *
+ * Kept here rather than by reordering `RIDE_ORDER`, which is what the paving
+ * network, the department panel and the dashboard are all built from — this is
+ * a presentation order for one row of chips, and it has no business changing
+ * how the park itself is assembled. Any ride missing from this list still
+ * appears, on the end, so a new attraction can never fall out of fast travel.
+ */
+const DEPARTMENT_NAV_ORDER: DepartmentRideId[] = [
+  "coaster",
+  "dragon",
+  "ferris",
+  "monster",
+  "tower",
+];
+
+const departmentsInNavOrder = [...RIDE_DEPARTMENTS].sort((a, b) => {
+  const rank = (id: DepartmentRideId) => {
+    const i = DEPARTMENT_NAV_ORDER.indexOf(id);
+    return i === -1 ? DEPARTMENT_NAV_ORDER.length : i;
+  };
+  return rank(a.rideId) - rank(b.rideId);
+});
+
+for (const d of departmentsInNavOrder) {
   const ride = rideById(d.rideId);
   const f = frame(ride.center, Math.max(ride.halfX, ride.halfZ), ride.height);
   places.push({

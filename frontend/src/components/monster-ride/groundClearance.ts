@@ -3,8 +3,9 @@ import {
   ARM_LENGTH,
   BASE_HEIGHT,
   ARM_ATTACH_HEIGHT,
-  GONDOLA_HEIGHT,
+  MIN_GROUND_CLEARANCE,
   MONSTER_ORIGIN,
+  TIP_TO_TUB_BOTTOM,
 } from "./constants";
 
 /**
@@ -22,8 +23,14 @@ export function terrainHeightAt(worldX: number, worldZ: number): number {
   return 0;
 }
 
-/** Minimum gap enforced between the lowest point of a cart and the ground. */
-export const MIN_GROUND_CLEARANCE = 0.75;
+/**
+ * Minimum gap enforced between the lowest point of a cart and the ground.
+ *
+ * Owned by `constants.ts`, because the undulation's centre tilt is SOLVED from
+ * it there — the wave is placed so its lowest point lands exactly on this
+ * bound. Re-exported here so callers of this module keep their import.
+ */
+export { MIN_GROUND_CLEARANCE } from "./constants";
 
 /** World height of the point where each arm pivots (the hub). */
 const HUB_WORLD_Y = MONSTER_ORIGIN[1] + BASE_HEIGHT + ARM_ATTACH_HEIGHT;
@@ -36,9 +43,7 @@ const HUB_WORLD_Y = MONSTER_ORIGIN[1] + BASE_HEIGHT + ARM_ATTACH_HEIGHT;
  * used there: -1.85 for the spider group, then half the gondola's own height
  * down to its floor.
  */
-const SPIDER_DROP_BELOW_TIP = 1.85;
-const GONDOLA_DROP_BELOW_SPIDER = GONDOLA_HEIGHT / 2;
-const TOTAL_DROP_FROM_TIP = SPIDER_DROP_BELOW_TIP + GONDOLA_DROP_BELOW_SPIDER;
+const TOTAL_DROP_FROM_TIP = TIP_TO_TUB_BOTTOM;
 
 /**
  * World-space height of the arm's tip as a function of its tilt angle.

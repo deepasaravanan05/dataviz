@@ -8,6 +8,7 @@ import { CAR_COUNT, CAR_SPACING, TRAIN_SPEED } from "./constants";
 import { TRACK_LENGTH } from "./trackCurve";
 import { carTransform, createCarTransform } from "./trainKinematics";
 import { validateSeats } from "./seatManifest";
+import { rideAnimationSecondsNow } from "@/simulation/journey/activeRideOps";
 
 /**
  * Places each car on the circuit and orients it from the track frame, so the
@@ -19,19 +20,26 @@ import { validateSeats } from "./seatManifest";
  */
 export function Train() {
   const groupRef = useRef<Group>(null);
-  const progress = useRef(0);
   const validated = useRef(false);
   const scratch = useMemo(() => createCarTransform(), []);
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     const group = groupRef.current;
     if (!group) return;
 
-    progress.current = (progress.current + delta * TRAIN_SPEED) % 1;
+    /*
+     * The train's place on the circuit comes from the ride's own animation
+     * clock rather than from an accumulating counter, so the coaster stands in
+     * its station between dispatches and runs a whole number of laps when it
+     * is released — ending exactly where it started, which is what puts the
+     * cars back at the platform for the next group. Its speed, spacing and
+     * banking are untouched.
+     */
+    const progress = ((TRAIN_SPEED * rideAnimationSecondsNow("coaster")) % 1 + 1) % 1;
     const spacingU = CAR_SPACING / TRACK_LENGTH;
 
     group.children.forEach((car: Object3D, i: number) => {
-      const { position, quaternion } = carTransform(progress.current - i * spacingU, scratch);
+      const { position, quaternion } = carTransform(progress - i * spacingU, scratch);
       car.position.copy(position);
       car.quaternion.copy(quaternion);
     });

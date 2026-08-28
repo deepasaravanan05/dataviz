@@ -7,9 +7,32 @@ import { TRACK_SEGMENTS } from "./constants";
  * vertical loop, a banked return turn, a run of airtime hills, and a low
  * sweeping turn back into the station.
  *
+ * THE HILLS WERE RAISED, and only the hills. The crest, the first drop and the
+ * two airtime hills all come up together by HILL_RAISE, and the
+ * vertical loop did NOT: a loop stretched vertically stops being a loop, and
+ * on a real coaster the lift hill towers over it anyway. Nothing moved in x or
+ * z, so the circuit covers exactly the ground it always did — which is what
+ * lets the coaster grow without the park's tightly-packed sightlines from the
+ * main gate having to be re-planned around it.
+ *
  * Local space: +x runs away from the Ferris Wheel, +y is up, +z is depth.
  * These are hand-placed coaster elements — deliberately not a sine wave.
  */
+/** Deck height of the station, and the datum every hill is measured from. */
+const STATION_Y = 3.0;
+
+/**
+ * How much taller the hills are than the circuit was first drawn with.
+ *
+ * Applied about the station deck, so the track still meets the platform at the
+ * same height and only the airborne parts rise. It is one number because the
+ * lift hill, the drop that follows it and the airtime hills have to grow
+ * TOGETHER — raising the crest alone would leave the train falling off a cliff
+ * into an unchanged drop.
+ */
+const HILL_RAISE = 1.20;
+const hill = (y: number) => STATION_Y + (y - STATION_Y) * HILL_RAISE;
+
 const CONTROL_POINTS: [number, number, number][] = [
   // Station / brake run (low and straight)
   [-20, 3.0, -12],
@@ -17,14 +40,14 @@ const CONTROL_POINTS: [number, number, number][] = [
   [-4, 3.2, -12],
 
   // Lift hill
-  [2, 8.0, -12],
-  [7, 16.0, -12],
-  [11, 23.0, -12],
-  [14, 25.5, -11.5], // crest
+  [2, hill(8.0), -12],
+  [7, hill(16.0), -12],
+  [11, hill(23.0), -12],
+  [14, hill(25.5), -11.5], // crest
 
   // First drop
-  [17, 20.0, -10],
-  [19, 12.0, -8],
+  [17, hill(20.0), -10],
+  [19, hill(12.0), -8],
   [20, 6.0, -5.5], // bottom of the drop
 
   // Vertical loop (drifts slightly in +z so entry and exit do not collide)
@@ -41,9 +64,9 @@ const CONTROL_POINTS: [number, number, number][] = [
   [15.0, 8.0, 15.5],
 
   // Airtime hills heading back
-  [6.0, 12.0, 16.0],
+  [6.0, hill(12.0), 16.0],
   [-2.0, 6.0, 15.0],
-  [-9.0, 11.0, 12.5],
+  [-9.0, hill(11.0), 12.5],
   [-15.0, 6.0, 9.0],
 
   // Low sweeping turn back into the station

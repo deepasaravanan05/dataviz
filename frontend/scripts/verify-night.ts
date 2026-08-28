@@ -3,8 +3,14 @@ import { join } from "node:path";
 import * as THREE from "three";
 import { PARK_LAYOUT, rideById } from "../src/components/park/layout";
 import { PARK_SCALE } from "../src/components/park/parkScale";
+import { SKY_THEMES } from "../src/components/world/skyThemes";
+import { COASTER_ORIGIN } from "../src/components/roller-coaster/constants";
+import { DRAGON_ORIGIN } from "../src/components/dragon-ride/constants";
+import { MONSTER_ORIGIN } from "../src/components/monster-ride/constants";
+import { TOWER_ORIGIN } from "../src/components/drop-tower/constants";
 import { CAMERA_PLACES, placeById } from "../src/components/world/cameraPlaces";
 import { RIDE_LOOK } from "../src/components/world/rideLighting";
+import { RIDE_PAINT } from "../src/world/ridePaint";
 import { RIDE_DEPARTMENTS } from "../src/components/park/departments";
 import { TOWER_HEIGHT } from "../src/components/drop-tower/constants";
 import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
@@ -32,32 +38,79 @@ check(
   /<NightSky \/>/.test(scene) && !/<Sky /.test(scene),
   "gradient dome, stars and a moon replace the daylight sky",
 );
+/*
+ * The park now renders at a chosen time of day, so these values live in the
+ * shared theme table instead of as literals in the scene. The night this
+ * script was written for is the `dark` entry, and it is asserted value for
+ * value — the scene is separately checked to read from that table.
+ */
+const NIGHT = SKY_THEMES.dark;
+check(
+  "the scene takes its atmosphere from the shared theme table",
+  /SKY_THEMES\[/.test(scene) && /sky\.fog\.color/.test(scene) && /sky\.key\.color/.test(scene),
+  "background, fog, lights, exposure and ground all come from one source",
+);
 check(
   "the background is near-black",
-  /<color attach="background" args=\{\["#05070f"\]\}/.test(scene),
-  "#05070f",
+  NIGHT.background === "#05070f",
+  NIGHT.background,
 );
-const fog = scene.match(/args=\{\["(#[0-9a-f]{6})", (\d+), (\d+)\]\}/);
 check(
   "the haze is a night haze",
-  fog !== null && fog[1] === "#0a1020",
-  fog ? `${fog[1]} from ${fog[2]} m to ${fog[3]} m` : "no fog found",
+  NIGHT.fog.color === "#0a1020",
+  `${NIGHT.fog.color} from ${NIGHT.fog.near} m to ${NIGHT.fog.far} m`,
 );
 check(
   "the key light is moonlight, not sunlight",
-  /color="#a8c4ff"/.test(scene) && /intensity=\{0\.62\}/.test(scene),
+  NIGHT.key.color === "#a8c4ff" && NIGHT.key.intensity === 0.62,
   "one cool, dim, shadow-casting source",
 );
 check(
   "exposure is pulled down so the dark stays dark",
-  /toneMappingExposure: 0\.9/.test(scene) && /ACESFilmicToneMapping/.test(scene),
-  "ACES filmic at 0.92",
+  NIGHT.toneMappingExposure === 0.92 && /ACESFilmicToneMapping/.test(scene),
+  `ACES filmic at ${NIGHT.toneMappingExposure}`,
 );
+/*
+ * The night ground.
+ *
+ * This used to pin the grass to the literal "#23231a" it was first tuned at.
+ * The ground has since become a generated lawn rather than a painted plane,
+ * and its hue moved from a near-neutral olive to a dark green with it — so
+ * pinning the hex would now only assert that a superseded colour survived.
+ * What actually has to hold is the property the original value was chosen for:
+ * the night ground must be as DARK as it always was, whatever colour it is.
+ * That is asserted directly, against the original value's own luminance.
+ */
+const REC709 = (hex: string) =>
+  0.2126 * parseInt(hex.slice(1, 3), 16) +
+  0.7152 * parseInt(hex.slice(3, 5), 16) +
+  0.0722 * parseInt(hex.slice(5, 7), 16);
+const ORIGINAL_NIGHT_GRASS = "#23231a";
+const nightGrass = NIGHT.ground.grass;
+const g = parseInt(nightGrass.slice(3, 5), 16);
 check(
-  "the ground is dark landscaped terrain, not bright green",
-  /grassColor="#16251a"/.test(scene),
-  "deep green, still readable as planted ground",
+  "the night ground is planted ground, and no lighter than the night it was tuned for",
+  Math.abs(REC709(nightGrass) - REC709(ORIGINAL_NIGHT_GRASS)) < 2 &&
+    g > parseInt(nightGrass.slice(1, 3), 16) &&
+    g > parseInt(nightGrass.slice(5, 7), 16) &&
+    NIGHT.ground.plaza === "#3a3128",
+  `${nightGrass} at luminance ${REC709(nightGrass).toFixed(1)} against the original ` +
+    `${ORIGINAL_NIGHT_GRASS} at ${REC709(ORIGINAL_NIGHT_GRASS).toFixed(1)} — same darkness, now green`,
 );
+/* The lit themes are the point of the feature: they must not be night again. */
+for (const id of ["sunset", "sunrise"] as const) {
+  const t = SKY_THEMES[id];
+  const lum = (hex: string) =>
+    [1, 3, 5].reduce((a, i) => a + parseInt(hex.slice(i, i + 2), 16), 0) / 3;
+  check(
+    `${t.label} is a lit sky, not a dark one`,
+    lum(t.dome.horizon) > 150 &&
+      t.toneMappingExposure > NIGHT.toneMappingExposure &&
+      t.key.intensity > NIGHT.key.intensity * 2 &&
+      !t.stars,
+    `horizon ${t.dome.horizon}, exposure ${t.toneMappingExposure}, key ${t.key.intensity}`,
+  );
+}
 check(
   "surfaces were repainted for night rather than left in daylight colours",
   /#15171d/.test(kitSrc) && /#2e3138/.test(kitSrc) && !/color: "#b0aca3"/.test(kitSrc),
@@ -137,6 +190,73 @@ check(
   closestHue > 0.05,
   `closest pair ${closestPair} is ${(closestHue * 360).toFixed(0)}deg apart on the wheel`,
 );
+/*
+ * THE PAINT, not just the light.
+ *
+ * A light only reads at dusk, so each ride's STRUCTURE is painted its own
+ * colour too. The same hue-distance test applies: six painted rides that a
+ * visitor could confuse at a distance would defeat the point of painting
+ * them. The light and dark tones are the same hue as the light tone by
+ * construction, so testing the lit face tests the ride.
+ */
+check(
+  "all six rides carry a structural paint colour",
+  SIX.every((id) => RIDE_PAINT[id as keyof typeof RIDE_PAINT]),
+  SIX.map((id) => `${id}: ${RIDE_PAINT[id as keyof typeof RIDE_PAINT]?.light}`).join(", "),
+);
+let closestPaint = 1;
+let closestPaintPair = "";
+for (let i = 0; i < SIX.length; i++) {
+  for (let j = i + 1; j < SIX.length; j++) {
+    const d = hueDistance(
+      RIDE_PAINT[SIX[i] as keyof typeof RIDE_PAINT].light,
+      RIDE_PAINT[SIX[j] as keyof typeof RIDE_PAINT].light,
+    );
+    if (d < closestPaint) {
+      closestPaint = d;
+      closestPaintPair = `${SIX[i]}/${SIX[j]}`;
+    }
+  }
+}
+check(
+  "no two rides are painted the same colour",
+  closestPaint > 0.05,
+  `closest pair ${closestPaintPair} is ${(closestPaint * 360).toFixed(0)}deg apart on the wheel`,
+);
+/* Each ride's paint must also sit near its own LED accent, so the ride that
+   glows blue at night is the ride that is blue at noon. */
+let worstMatch = 0;
+let worstMatchRide = "";
+for (const id of SIX) {
+  const d = hueDistance(RIDE_PAINT[id as keyof typeof RIDE_PAINT].light, RIDE_LOOK[id].accent);
+  if (d > worstMatch) {
+    worstMatch = d;
+    worstMatchRide = id;
+  }
+}
+check(
+  "a ride's paint and its LED accent are the same colour identity",
+  worstMatch < 0.09,
+  `furthest is ${worstMatchRide} at ${(worstMatch * 360).toFixed(0)}deg between paint and light`,
+);
+/* The three tones of one ride must be one hue at falling lightness, or the
+   lattice would read as three different rides bolted together. */
+let toneDrift = 0;
+let toneRide = "";
+for (const id of SIX) {
+  const p = RIDE_PAINT[id as keyof typeof RIDE_PAINT];
+  const d = Math.max(hueDistance(p.light, p.mid), hueDistance(p.light, p.dark));
+  if (d > toneDrift) {
+    toneDrift = d;
+    toneRide = id;
+  }
+}
+check(
+  "each ride's three tones are one hue, not three colours",
+  toneDrift < 0.02,
+  `widest drift is ${toneRide} at ${(toneDrift * 360).toFixed(1)}deg across its three tones`,
+);
+
 check(
   "each rig is built from that ride's own published geometry",
   /COASTER_CURVE/.test(rigSrc) &&
@@ -165,12 +285,25 @@ check(
   PARK_SCALE >= 2,
   `PARK_SCALE ${PARK_SCALE}x (was 1.7x)`,
 );
+/*
+ * Ride placement, as it now stands.
+ *
+ * Three of these are the centres the park has always had. Two changed, and both
+ * changes were asked for or forced by one that was:
+ *
+ *   - the Monster Ride and the Drop Tower each STEPPED BACK 40 m, away from the
+ *     main gate at z = 620 and deeper into the park;
+ *   - the Roller Coaster moved 12.3 m west, which nobody asked for. Every ride
+ *     grew 20%, and at full size the Roller Coaster and the Monster Ride
+ *     overlap by 12.5 m in x. The layout solver will not let two rides
+ *     intersect, so it pushed the pair apart symmetrically.
+ */
 const EXPECTED: Record<string, [number, number]> = {
   ferris: [-165, 250],
   dragon: [-72.3, 117.7],
-  coaster: [70, -10],
-  monster: [205, 90],
-  tower: [267.75, 280],
+  coaster: [57.7196817359987, -10],
+  monster: [217.2803182640013, 50],
+  tower: [267.75, 240],
 };
 check(
   "every ride is still at its exact original centre",
@@ -342,6 +475,37 @@ for (const id of SIX) {
     `  ${(r?.label ?? "Park Train").padEnd(16)} ${(r ? `${r.height.toFixed(0)} m` : "loop").padStart(6)}  ${RIDE_LOOK[id].label.padEnd(14)} ${frame}`,
   );
 }
+/*
+ * Every ride's LED rig must sit ON its ride.
+ *
+ * The rigs build their point lists from each ride's own local geometry, but a
+ * ride whose module renders inside <group position={ORIGIN}> needs its rig
+ * offset by that same origin, or the lights draw a second, empty copy of the
+ * ride beside the real one. The Roller Coaster shipped that way: its rig was
+ * 50u out in local space, 100u in world space at park scale.
+ */
+{
+  const rig = readFileSync(join(root, "src", "components", "world", "rideLighting.tsx"), "utf8");
+  const anchored: [string, number, RegExp][] = [
+    ["Roller Coaster", Math.hypot(COASTER_ORIGIN[0], COASTER_ORIGIN[2]),
+      /position=\{\[COASTER_ORIGIN\[0\], 0, COASTER_ORIGIN\[2\]\]\}/],
+    ["Drop Tower", Math.hypot(TOWER_ORIGIN[0], TOWER_ORIGIN[2]),
+      /position=\{\[TOWER_ORIGIN\[0\], 0, TOWER_ORIGIN\[2\]\]\}/],
+    ["Dragon Ride", Math.hypot(DRAGON_ORIGIN[0], DRAGON_ORIGIN[2]),
+      /const \[ox, , oz\] = DRAGON_ORIGIN/],
+    ["Monster Ride", Math.hypot(MONSTER_ORIGIN[0], MONSTER_ORIGIN[2]),
+      /const \[ox, , oz\] = MONSTER_ORIGIN/],
+  ];
+  const missing = anchored.filter(([, offset, re]) => offset > 0.001 && !re.test(rig));
+  check(
+    "every ride's LED rig is anchored to that ride's own origin",
+    missing.length === 0,
+    missing.length
+      ? `${missing.map(([n]) => n).join(", ")} would draw their lights beside the ride`
+      : anchored.map(([n, o]) => `${n} ${o.toFixed(0)}u`).join(", "),
+  );
+}
+
 console.log(`\nOverview from [${overview.position.join(", ")}] looking at [${overview.lookAt.join(", ")}].`);
 console.log(`Real light sources in the whole park: ${realLights}.`);
 

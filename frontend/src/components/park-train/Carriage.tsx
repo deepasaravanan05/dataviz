@@ -2,9 +2,19 @@
 
 import { Quaternion, Vector3 } from "three";
 import { useMemo } from "react";
-import { CAR_LENGTH, CAR_RAIL_HEIGHT, CAR_WIDTH, PALETTE, WHEEL_RADIUS } from "./constants";
+import {
+  BENCH_RISE,
+  CAR_LENGTH,
+  CAR_RAIL_HEIGHT,
+  CAR_WIDTH,
+  PALETTE,
+  SEATS_PER_ROW,
+  SEAT_ROWS_PER_CARRIAGE,
+  WHEEL_RADIUS,
+} from "./constants";
 import { ridersForCarriage } from "./riders";
 import { SeatedRider } from "./SeatedRider";
+import { SEAT_GREY, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
 
 const halfW = CAR_WIDTH / 2;
 const halfL = CAR_LENGTH / 2;
@@ -60,13 +70,31 @@ const POST_CORNERS: [number, number][] = [
   [halfW, halfL * 0.34],
 ];
 
-const BENCH_Z = 0;
-const COL_X = [-2, -1, 0, 1, 2].map((c) => c * (CAR_WIDTH / 5.5));
+/**
+ * The two bench rows, and the five seats across each of them.
+ *
+ * Both rows face forward, set symmetrically about the car's centre at a pitch
+ * that leaves a walking gap between the back of the front bench and the front
+ * of the rear one — the same arrangement an open-air park train really uses.
+ * The car itself is unchanged: these all sit inside the existing CAR_LENGTH.
+ */
+const ROW_PITCH = CAR_LENGTH * 0.42;
+const ROW_Z = Array.from(
+  { length: SEAT_ROWS_PER_CARRIAGE },
+  (_, r) => (r - (SEAT_ROWS_PER_CARRIAGE - 1) / 2) * ROW_PITCH,
+);
+const COL_X = Array.from(
+  { length: SEATS_PER_ROW },
+  (_, c) => (c - (SEATS_PER_ROW - 1) / 2) * (CAR_WIDTH / 5.5),
+);
+/** Which row and column a flat in-carriage seat index lands on. */
+const seatRow = (seat: number) => Math.floor(seat / SEATS_PER_ROW);
+const seatCol = (seat: number) => seat % SEATS_PER_ROW;
 
 /**
  * A compact open-air passenger car: a flat floor, low dark-metal guard-rails
  * on gold-capped posts around the perimeter (Heidi-inspired accent), and a
- * single bench row of five individual bucket-style seats with wood-panel
+ * two bench rows of five individual bucket-style seats with wood-panel
  * backrests spanning the car's width — no roof, no canopy, no enclosing
  * walls, so every seated employee is visible from either side or above.
  * Local forward (+Z) points toward the locomotive.
@@ -127,24 +155,34 @@ export function Carriage({ index, showLabels }: { index: number; showLabels: boo
         ))}
       </group>
 
-      {/* Bench seat: single row of 5 across the car's width, wood-panel backrests, no roof above them */}
-      <group position={[0, floorY + 0.12, BENCH_Z]}>
-        <mesh castShadow>
-          <boxGeometry args={[CAR_WIDTH * 0.88, 0.14, 1.0]} />
-          <meshStandardMaterial color={PALETTE.seat} roughness={0.6} />
-        </mesh>
-        {/* Individual wood-panel backrests, one per seat, angled slightly like the reference's bucket seats */}
-        {COL_X.map((x, c) => (
-          <mesh key={c} position={[x, 0.42, -0.44]} rotation={[-0.12, 0, 0]} castShadow>
-            <boxGeometry args={[0.62, 0.72, 0.1]} />
-            <meshStandardMaterial color={PALETTE.woodPanel} roughness={0.75} />
+      {/* Two bench rows of 5 across the car's width, wood-panel backrests, no roof above them */}
+      {ROW_Z.map((bz, r) => (
+        <group key={r} position={[0, floorY + BENCH_RISE + 0.03, bz]}>
+          {/* Grey, like every seat in the park — see world/seatColor.ts. */}
+          <mesh castShadow>
+            <boxGeometry args={[CAR_WIDTH * 0.88, 0.14, 0.86]} />
+            <meshStandardMaterial color={SEAT_GREY} roughness={SEAT_ROUGHNESS} metalness={SEAT_METALNESS} />
           </mesh>
-        ))}
-      </group>
+          {/* Individual wood-panel backrests, one per seat, angled slightly like the reference's bucket seats */}
+          {COL_X.map((x, c) => (
+            <mesh key={c} position={[x, 0.42, -0.38]} rotation={[-0.12, 0, 0]} castShadow>
+              <boxGeometry args={[0.62, 0.72, 0.1]} />
+              <meshStandardMaterial color={PALETTE.woodPanel} roughness={0.75} />
+            </mesh>
+          ))}
+        </group>
+      ))}
 
       {/* Seated riders — nothing above them, fully visible from either side or above */}
       {riders.map((rider) => (
-        <group key={rider.seatIndex} position={[COL_X[rider.seat], floorY + 0.19, BENCH_Z + 0.1]}>
+        <group
+          key={rider.seatIndex}
+          position={[
+            COL_X[seatCol(rider.seat)],
+            floorY + BENCH_RISE + 0.1,
+            ROW_Z[seatRow(rider.seat)] + 0.1,
+          ]}
+        >
           <SeatedRider rider={rider} showLabel={showLabels} />
         </group>
       ))}

@@ -4,7 +4,8 @@ import { useFrame } from "@react-three/fiber";
 import { useRef, type RefObject } from "react";
 import type { Group, Object3D } from "three";
 import { Cabin } from "./Cabin";
-import { CABINS, validateCabins } from "./cabinManifest";
+import { CABINS, countByColor, validateCabins } from "./cabinManifest";
+import { CABIN_COUNT } from "./constants";
 import type { SeatColor } from "@/types/simulation";
 
 /** Tag written onto each mounted cabin pivot so validation can count real objects. */
@@ -29,16 +30,34 @@ function assertMountedCabins(root: Object3D) {
   const yellow = cabins.filter((c) => colorOf(c) === "YELLOW");
   const red = cabins.filter((c) => colorOf(c) === "RED");
 
+  /*
+   * WHAT WAS MOUNTED IS WHAT THE MANIFEST DECLARED.
+   *
+   * This used to assert the literal 60 / 20-20-20 the wheel was built with,
+   * which made it a second, silently stale copy of the manifest's own rule the
+   * moment the ride was re-capacitied to 40. It now compares the mounted
+   * cabins against `cabinManifest.ts` — which is the only thing this function
+   * was ever really for: proving that every cabin the manifest declares
+   * actually reached the scene graph.
+   */
   console.assert(
-    cabins.length === 60,
-    `Expected exactly 60 cabins, found ${cabins.length}`,
+    cabins.length === CABIN_COUNT,
+    `Expected exactly ${CABIN_COUNT} cabins, found ${cabins.length}`,
   );
-  console.assert(green.length === 20, `Expected 20 green cabins, found ${green.length}`);
-  console.assert(yellow.length === 20, `Expected 20 yellow cabins, found ${yellow.length}`);
-  console.assert(red.length === 20, `Expected 20 red cabins, found ${red.length}`);
+  for (const [band, mounted] of [
+    ["GREEN", green],
+    ["YELLOW", yellow],
+    ["RED", red],
+  ] as const) {
+    const declared = countByColor(band);
+    console.assert(
+      mounted.length === declared,
+      `Expected ${declared} ${band.toLowerCase()} cabins, found ${mounted.length}`,
+    );
+  }
   console.assert(
-    green.length + yellow.length + red.length === 60,
-    `Color totals do not sum to 60`,
+    green.length + yellow.length + red.length === CABIN_COUNT,
+    `Color totals do not sum to ${CABIN_COUNT}`,
   );
 
   console.info(
@@ -48,10 +67,11 @@ function assertMountedCabins(root: Object3D) {
 }
 
 /**
- * All 60 cabin mounts. Each mount is a child of the rotating wheel assembly,
- * so it orbits with the wheel; the pivot inside it is driven to the negation
- * of the assembly's rotation every frame, keeping the gondola upright through
- * the full revolution (§12). One useFrame drives all 60 pivots.
+ * Every cabin mount the manifest declares. Each mount is a child of the
+ * rotating wheel assembly, so it orbits with the wheel; the pivot inside it is
+ * driven to the negation of the assembly's rotation every frame, keeping the
+ * gondola upright through the full revolution (§12). One useFrame drives every
+ * pivot.
  */
 export function Cabins({ rotorRef }: { rotorRef: RefObject<Group | null> }) {
   const groupRef = useRef<Group>(null);
@@ -81,7 +101,7 @@ export function Cabins({ rotorRef }: { rotorRef: RefObject<Group | null> }) {
       {CABINS.map((spec) => (
         <group key={spec.index} position={spec.mount}>
           <group userData={{ isCabin: true, cabinColor: spec.color }}>
-            <Cabin color={spec.color} />
+            <Cabin color={spec.color} index={spec.index} />
           </group>
         </group>
       ))}
