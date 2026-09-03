@@ -6,6 +6,7 @@ import {
 import { formatSimTime } from "@/simulation/clock";
 import {
   resolveDepartmentRides,
+  RIDE_ORDER,
   type DepartmentInfo,
   type DepartmentRideId,
 } from "@/components/park/departments";
@@ -15,13 +16,11 @@ import {
   rideById,
 } from "@/components/park/layout";
 import { EMPLOYEE_DATASET, type DatasetRow } from "./dataset";
-import {
-  DEPARTMENT_RIDE_IDS,
-  seatPose,
-} from "./rideKinematics";
+import { DEPARTMENT_RIDE_IDS, seatPose } from "./rideKinematics";
 import {
   AT_RIDE_DWELL,
   buildRideSchedule,
+  rideIntake,
   segmentAnimationSeconds,
   stairFor,
   type RideArrival,
@@ -542,11 +541,62 @@ export function buildJourney(rows: DatasetRow[]): JourneyData {
    */
   const rideMap = resolveDepartmentRides(rows.map((r) => r.department));
 
+  /*
+   * ...AND NOBODY SENT TO A RIDE THAT IS ALREADY FULL.
+   *
+   * A seat taken on this park is a seat kept — an employee who boards stays
+   * aboard for the rest of the day — so a ride can take on exactly as many
+   * people as it has seats at platform level, and no more. The built-in six
+   * departments never come close, but a roster of a hundred does, and the
+   * Ferris Wheel is the one that fills first: its rim curves away from the
+   * platform so steeply that only eleven cabins are ever reachable, and it
+   * serves two departments.
+   *
+   * So the department's own ride is a PREFERENCE, honoured whenever it has a
+   * seat, and the overflow goes to whichever existing attraction has the most
+   * room. The number of places each ride has is `rideIntake()` — the seats its
+   * boarding deck reaches, which is the same array `buildRideSchedule` deals
+   * out, so a place promised here is a seat that exists there. Never a new destination, never a ride moved or resized — the same
+   * standing rule that puts an unknown department on an existing ride, applied
+   * one level down to the individual employee when their ride is full.
+   *
+   * Deterministic: places are dealt in check-in order with ties broken by row,
+   * so a roster always fills the park the same way.
+   */
+  const seatsLeft = new Map<DepartmentRideId, number>(
+    RIDE_ORDER.map((id) => [id, rideIntake(id)]),
+  );
+  const assigned = new Array<DepartmentInfo>(rows.length);
+  const arrivalOrder = rows
+    .map((_, i) => i)
+    .sort((a, b) => rows[a].checkIn - rows[b].checkIn || a - b);
+
+  for (const i of arrivalOrder) {
+    const home = rideMap.get(rows[i].department)!;
+    let target = home.rideId;
+    if ((seatsLeft.get(target) ?? 0) <= 0) {
+      const roomiest = RIDE_ORDER.filter((id) => (seatsLeft.get(id) ?? 0) > 0).sort(
+        (a, b) => (seatsLeft.get(b) ?? 0) - (seatsLeft.get(a) ?? 0),
+      )[0];
+      if (!roomiest) {
+        throw new Error(
+          `${rows[i].id} arrived at ${home.rideName} but the park has no seat left. ` +
+            `A roster must not exceed the seating the rides actually have.`,
+        );
+      }
+      target = roomiest;
+    }
+    seatsLeft.set(target, (seatsLeft.get(target) ?? 0) - 1);
+    assigned[i] =
+      target === home.rideId
+        ? home
+        : { department: home.department, rideId: target, rideName: rideById(target).label };
+  }
+
   // Per-ride seat counting, so a department's crowd fans out realistically.
   const perRideTotal: Record<string, number> = {};
-  for (const row of rows) {
-    const rideId = rideMap.get(row.department)!.rideId;
-    perRideTotal[rideId] = (perRideTotal[rideId] ?? 0) + 1;
+  for (const dept of assigned) {
+    perRideTotal[dept.rideId] = (perRideTotal[dept.rideId] ?? 0) + 1;
   }
   const perRideIndex: Record<string, number> = {};
 
@@ -560,7 +610,7 @@ export function buildJourney(rows: DatasetRow[]): JourneyData {
    * visible.
    */
   const geometry = rows.map((row, i) => {
-    const dept = rideMap.get(row.department)!;
+    const dept = assigned[i];
     const standIndex = perRideIndex[dept.rideId] ?? 0;
     perRideIndex[dept.rideId] = standIndex + 1;
 

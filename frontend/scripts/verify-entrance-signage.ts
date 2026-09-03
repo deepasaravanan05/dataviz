@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CAMERA_PLACES, placeById } from "@/components/world/cameraPlaces";
 import { PARK_LAYOUT } from "@/components/park/layout";
+import { ENTRANCE_CAMERA_POSITION, ENTRANCE_FOV } from "@/components/world/entranceView";
 import {
   FOOD_COURT_CENTER,
   FOOD_COURT_HALF,
@@ -17,6 +18,8 @@ import {
   GATE_OPENING,
   GATE_PILLAR_HALF,
   GATE_ARCH_Y,
+  GATE_X,
+  GATE_Z,
 } from "@/simulation/journey/constants";
 import {
   PAVILION_DEPTH,
@@ -123,11 +126,32 @@ ok(TEXT.length * FONT * 0.62 < BOARD_HALF * 2 * 0.94,
 
 /* Apparent size from the cameras that actually look at the gate. */
 const pxPerUnit = (d: number, fov: number) => 1080 / (2 * d * Math.tan((fov * Math.PI) / 360));
-const gateX = 70, gateZ = 620;
+/*
+ * THE CAMERAS ARE READ FROM THE MODULES THAT OWN THEM, not typed here.
+ *
+ * These were the literals (70, 620) and a 95 u standoff on a 30 deg lens, which
+ * was the entrance view of the time. Both have since moved: every ride is built
+ * to one common height, the park is some 1.4 km across, the main gate stepped
+ * back 140 m because the railway grew past it, and the landing page's lens
+ * widened to 52 deg at 190 u so that the cast is on screen at all. Comparing
+ * the new chip against the old gate coordinate was measuring nothing.
+ *
+ * WHAT THAT COSTS THE SIGN, stated rather than hidden: from the landing page
+ * the name's cap height is about 20 px on a 1080-tall viewport instead of the
+ * 46 px the old narrow lens gave. It is still comfortably legible — a 20 px
+ * capital is bigger than body text on this page — and the board cannot simply
+ * grow to win the pixels back: it is sized by the arch it hangs under, and it
+ * already spans it. A bigger name would mean a bigger gate.
+ */
+const gateX = GATE_X, gateZ = GATE_Z;
 const cap = FONT * 0.7;
-const dPage = Math.hypot(14 - BOARD_Y, (gateZ + 95) - gateZ);
-ok(cap * pxPerUnit(dPage, 30) > 40,
-   `cap height reads ${(cap * pxPerUnit(dPage, 30)).toFixed(0)} px from the Main Entrance page camera`);
+const dPage = Math.hypot(
+  ENTRANCE_CAMERA_POSITION[1] - BOARD_Y,
+  ENTRANCE_CAMERA_POSITION[2] - gateZ,
+);
+ok(cap * pxPerUnit(dPage, ENTRANCE_FOV) > 18,
+   `cap height reads ${(cap * pxPerUnit(dPage, ENTRANCE_FOV)).toFixed(0)} px from the Main Entrance ` +
+   `page camera, ${ENTRANCE_CAMERA_POSITION[2] - gateZ} u back on a ${ENTRANCE_FOV} deg lens`);
 const chip = placeById("entrance");
 const dChip = Math.hypot(chip.position[0] - gateX, chip.position[1] - BOARD_Y, chip.position[2] - gateZ);
 ok(cap * pxPerUnit(dChip, 46) > 25,

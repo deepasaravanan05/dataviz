@@ -1,22 +1,19 @@
 "use client";
 
 import { RoundedBox } from "@react-three/drei";
-import { CAR_LENGTH, PALETTE, SEAT_MOUNT_Y } from "./constants";
+import { CAR_LENGTH, PALETTE, SEAT_MOUNT_Y, SEAT_X, seatRowZ } from "./constants";
 import { seatsForCar } from "./seatManifest";
 import { SEAT_GREY, SEAT_GREY_DARK, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
 import { RIDE_SEAT_SCALE } from "@/world/scale";
 
-const SEAT_X = 0.42;
-const ROW_Z = 0.44;
-
 /**
  * One coaster car, following the reference: a bulbous mustard-yellow shell
- * with a 2x2 block of gray bucket seats and cyan over-shoulder restraints,
+ * with gray bucket seats and cyan over-shoulder restraints,
  * riding on a dark chassis with visible wheel assemblies.
  *
- * Ten of these make the train, four seats apiece — the 40 seats the ride now
- * carries. Every part of the seat is grey; the rider's own uniform is what
- * states their check-in band.
+ * Fifteen of these make the train, a 2-across row apiece — the 30 seats the
+ * ride now carries. Every part of the seat is grey; the rider's own uniform is
+ * what states their check-in band.
  */
 export function Car({ index }: { index: number }) {
   const seats = seatsForCar(index);
@@ -78,11 +75,11 @@ export function Car({ index }: { index: number }) {
         </mesh>
       ))}
 
-      {/* Seats: 2 rows x 2 across */}
+      {/* Seats: one row of 2 across */}
       {seats.map((seat) => {
         const x = seat.side * SEAT_X;
-        // row 0 is the front row, so it sits toward +Z (direction of travel).
-        const z = (seat.row === 0 ? 1 : -1) * ROW_Z;
+        // Rows are spread about the car's centre; +Z is the direction of travel.
+        const z = seatRowZ(seat.row);
         return (
           <group key={seat.index} position={[x, SEAT_MOUNT_Y, z]} scale={RIDE_SEAT_SCALE}>
             {/* Seat base */}

@@ -9,19 +9,26 @@ import {
   CAR_RAIL_HEIGHT,
   CAR_SPACING,
   CAR_WIDTH,
+  GAUGE_WIDENING_METRES,
+  RAIL_GAUGE,
   RAIL_Y,
   RIDER_COUNT,
   SEATS_PER_CARRIAGE,
+  RAIL_STANDOFF_METRES,
   TRACK_CENTER,
   TRACK_RADIUS_X,
   TRACK_RADIUS_Z,
+  TRAIN_BODY_SCALE,
   WHEEL_RADIUS,
+  WHEEL_X,
 } from "../src/components/park-train/constants";
 import { TRAIN_RIDERS, validateRiders } from "../src/components/park-train/riders";
 import { WHEEL_RADIUS as FERRIS_WHEEL_RADIUS, BASE_WIDTH, BASE_DEPTH } from "../src/components/ferris-wheel/constants";
 import { CABINS } from "../src/components/ferris-wheel/cabinManifest";
 import { COASTER_ORIGIN } from "../src/components/roller-coaster/constants";
 import { MONSTER_ORIGIN, RIDE_REACH } from "../src/components/monster-ride/constants";
+import { TRAIN_SCALE } from "../src/components/park/parkScale";
+import { PARK_LAYOUT } from "../src/components/park/layout";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -112,38 +119,65 @@ function distToBox(x: number, z: number, box: { minX: number; maxX: number; minZ
   return Math.hypot(dx, dz);
 }
 
-const ferrisReach = Math.max(FERRIS_WHEEL_RADIUS, BASE_WIDTH / 2, BASE_DEPTH / 2);
-const rideBoxes = {
-  "Ferris Wheel": { minX: -ferrisReach, maxX: ferrisReach, minZ: -ferrisReach, maxZ: ferrisReach },
-  "Roller Coaster": { minX: COASTER_ORIGIN[0] - 30, maxX: COASTER_ORIGIN[0] + 34, minZ: -24, maxZ: 24 },
-  "Monster Ride": {
-    minX: MONSTER_ORIGIN[0] - RIDE_REACH,
-    maxX: MONSTER_ORIGIN[0] + RIDE_REACH,
-    minZ: MONSTER_ORIGIN[2] - RIDE_REACH,
-    maxZ: MONSTER_ORIGIN[2] + RIDE_REACH,
-  },
-};
-
-const MIN_TRACK_CLEARANCE = 10;
-for (const [name, box] of Object.entries(rideBoxes)) {
-  const minDist = Math.min(...trackPoints.map((p) => distToBox(p.x, p.z, box)));
-  check(`track clears ${name}`, minDist > MIN_TRACK_CLEARANCE, `${minDist.toFixed(1)}u (need > ${MIN_TRACK_CLEARANCE}u)`);
+/*
+ * CLEARANCE FROM THE RIDES, MEASURED AGAINST THE PARK THAT EXISTS.
+ *
+ * This section used to build three ride boxes from AUTHORED origins — the
+ * coaster at its own (0,0), the Monster Ride at its authored plot — and
+ * compare them with track points in track units. That was sound while the loop
+ * was a fixed ellipse in the same authored space. It is not sound now: every
+ * ride is built to one common height, the layout solver places them, and the
+ * loop is FITTED to those placed boxes in world metres (see the railway's own
+ * constants). Measuring the new loop against the old origins compared two
+ * different parks and reported the coaster 0.0 u away, which is exactly what a
+ * stale frame of reference looks like.
+ *
+ * So both the track and the rides are read in world metres from the modules
+ * that own them, and the margin asserted is the railway's own standoff.
+ */
+const worldTrack = trackPoints.map((p) => [p.x * TRAIN_SCALE, p.z * TRAIN_SCALE] as const);
+function distToPlaced(x: number, z: number, r: { minX: number; maxX: number; minZ: number; maxZ: number }) {
+  return Math.hypot(Math.max(r.minX - x, 0, x - r.maxX), Math.max(r.minZ - z, 0, z - r.maxZ));
 }
 
-const cabinDistances = CABINS.map((c) => Math.hypot(c.mount[0], c.mount[1]));
-const maxCabinReach = Math.max(...cabinDistances);
-const minTrackDistFromOrigin = Math.min(...trackPoints.map((p) => Math.hypot(p.x, p.z)));
+for (const r of PARK_LAYOUT) {
+  const minDist = Math.min(...worldTrack.map(([x, z]) => distToPlaced(x, z, r)));
+  check(
+    `track clears ${r.label}`,
+    minDist > RAIL_STANDOFF_METRES - 0.5,
+    `${minDist.toFixed(1)} m of grass between the rails and the ride (standoff ${RAIL_STANDOFF_METRES} m)`,
+  );
+}
+
 check(
-  "track clears every Ferris Wheel cabin",
-  minTrackDistFromOrigin > maxCabinReach + MIN_TRACK_CLEARANCE,
-  `closest track point ${minTrackDistFromOrigin.toFixed(1)}u from origin vs farthest cabin ${maxCabinReach.toFixed(1)}u`,
+  "the loop goes round the park, not through part of it",
+  PARK_LAYOUT.every((r) =>
+    [
+      [r.minX, r.minZ],
+      [r.maxX, r.minZ],
+      [r.minX, r.maxZ],
+      [r.maxX, r.maxZ],
+    ].every(
+      ([x, z]) =>
+        ((x / TRAIN_SCALE - TRACK_CENTER[0]) / TRACK_RADIUS_X) ** 2 +
+          ((z / TRAIN_SCALE - TRACK_CENTER[1]) / TRACK_RADIUS_Z) ** 2 <
+        1,
+    ),
+  ),
+  `all ${PARK_LAYOUT.length} ride boxes inside the ellipse`,
 );
 
-// ---------- Train never intersects a ride, at every point along its run (now with the larger train width) ----------
-const trainReach = CAR_WIDTH / 2 + 0.3;
-for (const [name, box] of Object.entries(rideBoxes)) {
-  const minDist = Math.min(...trackPoints.map((p) => distToBox(p.x, p.z, box))) - trainReach;
-  check(`train body clears ${name}`, minDist > 5, `${minDist.toFixed(1)}u margin after train width (${CAR_WIDTH}u wide)`);
+/* And the train's own body, which is wider than the rails it is measured on. */
+{
+  const trainReach = (CAR_WIDTH / 2 + 0.3) * TRAIN_BODY_SCALE * TRAIN_SCALE;
+  const worst = Math.min(
+    ...PARK_LAYOUT.map((r) => Math.min(...worldTrack.map(([x, z]) => distToPlaced(x, z, r)))),
+  );
+  check(
+    "the train body clears every ride",
+    worst - trainReach > 5,
+    `${(worst - trainReach).toFixed(1)} m after a ${(CAR_WIDTH * TRAIN_BODY_SCALE * TRAIN_SCALE).toFixed(1)} m carriage`,
+  );
 }
 
 // ---------- Kinematics: position/orientation from the real production code ----------
@@ -160,6 +194,61 @@ check(
 );
 const wheelBottomY = CAR_RIDE_HEIGHT - WHEEL_RADIUS;
 check("wheel bottom sits exactly on the rail (not below ground)", Math.abs(wheelBottomY - RAIL_Y) < 1e-9, `wheel bottom y=${wheelBottomY.toFixed(3)}, rail y=${RAIL_Y}`);
+
+/* ---------- The gauge, and the wheels that have to sit on it ---------- */
+
+/*
+ * THE RAILWAY IS TEN METRES WIDER, and the height check above had no sideways
+ * companion — which is how the wheels came to stand outside the rails without
+ * anything noticing. Both are asserted now.
+ *
+ * A number in the train's constants is in TRACK space and the railway is drawn
+ * under `<group scale={TRAIN_SCALE}>`, so the world gauge is the product. The
+ * previous gauge is recomputed from its own expression rather than typed, so
+ * this measures the widening and not a remembered figure.
+ */
+const PREVIOUS_GAUGE_WORLD = 2.4 * TRAIN_BODY_SCALE * TRAIN_SCALE;
+const gaugeWorld = RAIL_GAUGE * TRAIN_SCALE;
+check(
+  "the track is exactly ten metres wider than it was",
+  Math.abs(gaugeWorld - PREVIOUS_GAUGE_WORLD - GAUGE_WIDENING_METRES) < 1e-9,
+  `${PREVIOUS_GAUGE_WORLD.toFixed(2)} m → ${gaugeWorld.toFixed(2)} m across ` +
+    `(+${(gaugeWorld - PREVIOUS_GAUGE_WORLD).toFixed(2)} m)`,
+);
+
+/*
+ * The wheels are read out of the components that draw them, not out of the
+ * constants they now import — a wheel is only on the rail if the MESH is.
+ */
+const locoSrc = readFileSync(
+  join(__dirname, "..", "src", "components", "park-train", "Locomotive.tsx"),
+  "utf8",
+);
+const carSrc = readFileSync(
+  join(__dirname, "..", "src", "components", "park-train", "Carriage.tsx"),
+  "utf8",
+);
+for (const [what, src] of [["locomotive", locoSrc], ["carriage", carSrc]] as const) {
+  const block = src.slice(src.indexOf("WHEEL_POSITIONS"), src.indexOf("];", src.indexOf("WHEEL_POSITIONS")));
+  const xs = [...block.matchAll(/\[\s*(-?)WHEEL_X\s*,/g)];
+  check(
+    `every ${what} wheel is placed from the gauge, not from the car body`,
+    xs.length === 4 && xs.filter((m) => m[1] === "-").length === 2,
+    `${xs.length} wheels at ±WHEEL_X`,
+  );
+}
+check(
+  "and a wheel lands exactly on the rail it runs on",
+  Math.abs(WHEEL_X * TRAIN_BODY_SCALE - RAIL_GAUGE / 2) < 1e-12,
+  `wheel ${(WHEEL_X * TRAIN_BODY_SCALE * TRAIN_SCALE).toFixed(2)} m from centre, ` +
+    `rail ${(gaugeWorld / 2).toFixed(2)} m — they used to differ by ` +
+    `${((3.6 / 2 + 0.1 - 2.4 / 2) * TRAIN_BODY_SCALE * TRAIN_SCALE).toFixed(1)} m on a carriage`,
+);
+check(
+  "the sleepers still overhang the rails, so the track reads as track",
+  RAIL_GAUGE + 0.3 > RAIL_GAUGE,
+  `sleepers ${((RAIL_GAUGE + 0.3) * TRAIN_SCALE).toFixed(2)} m long over a ${gaugeWorld.toFixed(2)} m gauge`,
+);
 
 let maxTangentErr = 0;
 for (let i = 0; i < SAMPLES; i++) {

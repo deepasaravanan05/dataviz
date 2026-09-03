@@ -32,9 +32,25 @@ import { GATE_X, GATE_Z } from "@/simulation/journey/constants";
  * of the frame where the story actually happens. `verify-legibility` re-derives
  * the projection and fails if the cast ever leaves the frame again.
  */
-export const ENTRANCE_FOV = 30;
+/*
+ * THE LENS HAD TO WIDEN WITH THE PARK.
+ *
+ * This composition was framed on a 30 deg lens 95 u back from the gate, which
+ * held the gate and the Ferris Wheel at the proportion the reference art has.
+ * Every ride is now built to one common height and the layout solver spread
+ * the fan to keep their silhouettes apart, so the park is some 1.4 km across
+ * where it was a few hundred metres — and the thirty employees walk to rides
+ * that no longer fit in a lens that narrow. Less than half the cast was on
+ * screen on the page a visitor lands on.
+ *
+ * So the lens widens and the camera steps back along the SAME axis, keeping
+ * the composition it was given: standing on the gate's own line, looking down
+ * the arrival road into the park, with the walking figures in the lower half
+ * of the frame and the rides above them.
+ */
+export const ENTRANCE_FOV = 46;
 
-export const ENTRANCE_CAMERA_POSITION: [number, number, number] = [GATE_X, 14, GATE_Z + 95];
+export const ENTRANCE_CAMERA_POSITION: [number, number, number] = [GATE_X, 34, GATE_Z + 150];
 
 /**
  * Aimed at the paving just inside the gate.
@@ -50,4 +66,4 @@ export const ENTRANCE_CAMERA_POSITION: [number, number, number] = [GATE_X, 14, G
  * the employees walking through them sit in the lower half of the frame, while
  * the rides and the sunset still fill the upper half exactly as before.
  */
-export const ENTRANCE_CAMERA_TARGET: [number, number, number] = [GATE_X, 2, GATE_Z - 60];
+export const ENTRANCE_CAMERA_TARGET: [number, number, number] = [GATE_X, 6, GATE_Z - 300];

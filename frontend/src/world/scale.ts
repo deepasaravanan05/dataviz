@@ -181,7 +181,7 @@ export const SIGN = {
 /**
  * HOW MUCH BIGGER THE RIDE SEATS AND THE PARK BENCHES ARE DRAWN.
  *
- * The park's seating was modelled at real dimensions — a 0.82 m drop-tower pan,
+ * The park's seating was modelled at real dimensions — a 0.82 m gondola pan,
  * a 0.92 m dragon cushion, a 0.34 m coaster bucket — for a real 1.75 m person.
  * The employees are drawn larger than that, so every seat read as child-sized
  * furniture beside them.

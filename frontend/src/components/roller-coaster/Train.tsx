@@ -4,7 +4,7 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import type { Group, Object3D } from "three";
 import { Car } from "./Car";
-import { CAR_COUNT, CAR_SPACING, TRAIN_SPEED } from "./constants";
+import { CAR_COUNT, CAR_SPACING, SEATS_PER_CAR, TRAIN_SPEED } from "./constants";
 import { TRACK_LENGTH } from "./trackCurve";
 import { carTransform, createCarTransform } from "./trainKinematics";
 import { validateSeats } from "./seatManifest";
@@ -53,8 +53,8 @@ export function Train() {
           `Expected ${CAR_COUNT} cars, found ${group.children.length}`,
         );
         console.info(
-          `[RollerCoaster] ${group.children.length} cars x 4 seats = ` +
-            `${group.children.length * 4} seats on a ${TRACK_LENGTH.toFixed(1)}u circuit`,
+          `[RollerCoaster] ${group.children.length} cars x ${SEATS_PER_CAR} seats = ` +
+            `${group.children.length * SEATS_PER_CAR} seats on a ${TRACK_LENGTH.toFixed(1)}u circuit`,
         );
       }
     }

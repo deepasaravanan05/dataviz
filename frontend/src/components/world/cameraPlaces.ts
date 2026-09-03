@@ -1,6 +1,47 @@
 import { PARK_CENTER, PARK_LAYOUT, PLAZA_CENTER, rideById } from "@/components/park/layout";
 import { RIDE_DEPARTMENTS, type DepartmentRideId } from "@/components/park/departments";
 import { FOOD_COURT_CENTER, GATE_X, GATE_Z } from "@/simulation/journey/constants";
+import { TRAIN_RIDE_NAME, TRAIN_TEAM_ID, TRAIN_TEAM_NAME } from "@/components/park/trainTeam";
+import {
+  CHAIRS_RIDE_NAME,
+  CHAIRS_TEAM_ID,
+  CHAIRS_TEAM_NAME,
+  OVERALL_HEIGHT as CHAIRS_HEIGHT,
+  OVERALL_REACH as CHAIRS_REACH,
+  RIDE_CENTER as CHAIRS_CENTER,
+} from "@/components/flying-chairs/constants";
+import {
+  LOOPER_RIDE_ID,
+  LOOPER_RIDE_NAME,
+  LOOPER_TEAM_NAME,
+  OVERALL_HEIGHT as LOOPER_HEIGHT,
+  OVERALL_REACH as LOOPER_REACH,
+} from "@/components/super-looper/constants";
+import { RIDE_CENTER as LOOPER_CENTER } from "@/components/super-looper/placement";
+import {
+  TEACUPS_RIDE_ID,
+  TEACUPS_RIDE_NAME,
+  TEACUPS_TEAM_NAME,
+  OVERALL_HEIGHT as TEACUPS_HEIGHT,
+  OVERALL_REACH as TEACUPS_REACH,
+} from "@/components/tea-cups/constants";
+import { RIDE_CENTER as TEACUPS_CENTER } from "@/components/tea-cups/placement";
+import { GIGA_RIDE_ID, GIGA_RIDE_NAME } from "@/components/giga-coaster/constants";
+import {
+  OVERALL_HEIGHT as GIGA_HEIGHT,
+  OVERALL_REACH as GIGA_REACH,
+} from "@/components/giga-coaster/envelope";
+import { RIDE_CENTER as GIGA_CENTER } from "@/components/giga-coaster/placement";
+import {
+  DUMBO_RIDE_ID,
+  DUMBO_RIDE_NAME,
+  DUMBO_TEAM_NAME,
+  OVERALL_HEIGHT as DUMBO_HEIGHT,
+  OVERALL_REACH as DUMBO_REACH,
+} from "@/components/dumbo-ride/constants";
+import { RIDE_CENTER as DUMBO_CENTER } from "@/components/dumbo-ride/placement";
+import { TRACK_CENTER, TRACK_RADIUS_X, TRACK_RADIUS_Z } from "@/components/park-train/constants";
+import { TRAIN_SCALE } from "@/components/park/parkScale";
 
 /**
  * Named viewpoints the camera can travel to.
@@ -45,22 +86,77 @@ const places: CameraPlace[] = [];
 /**
  * Full park overview.
  *
- * Not a guess. This position was solved by projecting every ride's bounding box
- * into screen space across a sweep of bearings, distances and altitudes, and
- * taking the viewpoint that maximises the smallest ride's share of the frame
- * while keeping the whole property — including the railway loop — inside it.
- * From here the smallest ride still covers 2.7% of the frame area, and the only
- * overlap is the drop tower's 4 m lattice clipping the corner of the Monster
- * Ride's box, which a mast that thin does not actually hide.
- * scripts/verify-night.ts re-derives all of that.
+ * Not a guess, and no longer a fixed one either. The position was originally
+ * solved by projecting every ride's bounding box into screen space across a
+ * sweep of bearings, distances and altitudes, and taking the viewpoint that
+ * kept the whole property — railway loop included — inside the frame with the
+ * smallest ride still reading. Then every ride was rebuilt to one common
+ * height, the layout spread to fit them, and the railway grew round the
+ * result: from the old spot the park no longer fitted in the lens at all.
+ *
+ * So the BEARING and the ELEVATION of that solved viewpoint are kept — they
+ * are what makes the fan read left to right — and only the DISTANCE is
+ * re-derived, from the park's own reach and the camera's own field of view.
+ * The park grows, the camera steps back, and the framing stays what it was.
+ * `verify-night.ts` re-projects everything from here and re-checks it.
  */
-places.push({
-  id: "overview",
-  label: "Full overview",
-  group: "park",
-  position: [398, 360, 887],
-  lookAt: [PARK_CENTER[0], 24, PARK_CENTER[1]],
-});
+const OVERVIEW_FOV_DEG = 46;
+/** How far the furthest thing in the park stands from the point we look at. */
+const PARK_REACH = (() => {
+  let reach = 0;
+  const take = (x: number, z: number) =>
+    (reach = Math.max(reach, Math.hypot(x - PARK_CENTER[0], z - PARK_CENTER[1])));
+  for (const r of PARK_LAYOUT) {
+    take(r.minX, r.minZ);
+    take(r.maxX, r.minZ);
+    take(r.minX, r.maxZ);
+    take(r.maxX, r.maxZ);
+  }
+  for (const [c, k] of [
+    [CHAIRS_CENTER, CHAIRS_REACH],
+    [LOOPER_CENTER, LOOPER_REACH],
+    [TEACUPS_CENTER, TEACUPS_REACH],
+    [GIGA_CENTER, GIGA_REACH],
+    [DUMBO_CENTER, DUMBO_REACH],
+  ] as [readonly [number, number], number][]) {
+    take(c[0] + k, c[1]);
+    take(c[0] - k, c[1]);
+    take(c[0], c[1] + k);
+    take(c[0], c[1] - k);
+  }
+  /* And the railway, which is the park's outline in this view. */
+  for (let i = 0; i < 96; i++) {
+    const a = (i / 96) * Math.PI * 2;
+    take(
+      (TRACK_CENTER[0] + Math.cos(a) * TRACK_RADIUS_X) * TRAIN_SCALE,
+      (TRACK_CENTER[1] + Math.sin(a) * TRACK_RADIUS_Z) * TRAIN_SCALE,
+    );
+  }
+  return reach;
+})();
+
+{
+  /* The solved viewpoint's own geometry: bearing and elevation, kept. */
+  const OFFSET: [number, number] = [398 - PARK_CENTER[0], 887 - PARK_CENTER[1]];
+  const OLD_GROUND = Math.hypot(OFFSET[0], OFFSET[1]);
+  const ELEVATION = Math.atan2(360, OLD_GROUND);
+  /* Far enough back that the park's reach fits the frame, with a little air —
+     and no more than that, because every extra metre of standoff shrinks the
+     rides, and the smallest of them still has to read as a ride. */
+  const distance = (PARK_REACH / Math.tan((OVERVIEW_FOV_DEG / 2) * (Math.PI / 180))) * 1.03;
+  const ground = distance * Math.cos(ELEVATION);
+  places.push({
+    id: "overview",
+    label: "Full overview",
+    group: "park",
+    position: [
+      PARK_CENTER[0] + (OFFSET[0] / OLD_GROUND) * ground,
+      distance * Math.sin(ELEVATION),
+      PARK_CENTER[1] + (OFFSET[1] / OLD_GROUND) * ground,
+    ],
+    lookAt: [PARK_CENTER[0], 24, PARK_CENTER[1]],
+  });
+}
 
 /** Mid park: several rides, the food court and the paths all legible at once. */
 places.push({
@@ -107,7 +203,7 @@ const DEPARTMENT_NAV_ORDER: DepartmentRideId[] = [
   "dragon",
   "ferris",
   "monster",
-  "tower",
+  "ufo",
 ];
 
 const departmentsInNavOrder = [...RIDE_DEPARTMENTS].sort((a, b) => {
@@ -126,6 +222,250 @@ for (const d of departmentsInNavOrder) {
     label: `${d.department} — ${d.rideName}`,
     group: "department",
     ...f,
+  });
+}
+
+/*
+ * The Park Train's chip.
+ *
+ * Added after the department chips rather than among them, because the train
+ * is not a department ride: it carries the DevOps team's NAME, not its people.
+ *
+ * `frame()` above is no use here. It sizes a viewpoint for a compact object
+ * standing on the ground, and this subject is the 850 m rail loop, twice the
+ * width of the whole ride fan; fed to `frame()` the camera ends up 26 m up
+ * looking at the near rail with the rest of the loop off both sides of the
+ * screen. So the stance was solved instead — the real TRACK_CURVE, sampled at
+ * 720 points and projected through the park's own 46-degree camera at 16:9,
+ * swept across distance and altitude for the fullest frame that still holds
+ * every point of the rail with a 6% margin. It came out at 1.670 loop radii
+ * back and 0.340 radii up. Kept as RATIOS of the loop's own radius rather than
+ * as world coordinates, so widening the track moves the viewpoint with it.
+ */
+{
+  const center: [number, number] = [TRACK_CENTER[0] * TRAIN_SCALE, TRACK_CENTER[1] * TRAIN_SCALE];
+  const radius = Math.max(TRACK_RADIUS_X, TRACK_RADIUS_Z) * TRAIN_SCALE;
+  const dx = GATE_X - center[0];
+  const dz = GATE_Z - center[1];
+  const len = Math.hypot(dx, dz) || 1;
+  const distance = radius * 1.67;
+  places.push({
+    id: TRAIN_TEAM_ID,
+    label: `${TRAIN_TEAM_NAME} — ${TRAIN_RIDE_NAME}`,
+    group: "department",
+    position: [center[0] + (dx / len) * distance, radius * 0.34, center[1] + (dz / len) * distance],
+    lookAt: [center[0], 0, center[1]],
+  });
+}
+
+/*
+ * The Flying Chairs' chip.
+ *
+ * Unlike the train, this ride is a compact object standing on the ground, so
+ * `frame()` sizes it correctly from its own reach and height — the same way
+ * every department chip is sized from its ride's box. It sits with the
+ * department chips because it carries a team name, and after them because it
+ * is not a department ride.
+ */
+{
+  /*
+   * ITS BEARING IS SEARCHED NOW, like the Tea Cups' and the Dumbo Ride's.
+   *
+   * `frame()` stands back from a ride along the gate's own direction, which was
+   * open ground when this ride sat close behind the food court. Every ride is
+   * built to one common height now, the fan is far wider, and the ride stands
+   * three hundred metres out — and from there the gate side of it is the
+   * Monster Ride, so the framed viewpoint landed inside another ride. The
+   * bearing walks away from the gate direction two degrees at a time,
+   * alternating sides, and stops at the first one standing the camera in clear
+   * air.
+   */
+  const distance = Math.max(CHAIRS_REACH * 2.1 + 26, CHAIRS_HEIGHT * 1.8 + 24);
+  const toGate = Math.atan2(GATE_Z - CHAIRS_CENTER[1], GATE_X - CHAIRS_CENTER[0]);
+  const clear = (x: number, z: number) =>
+    !PARK_LAYOUT.some(
+      (r) => x > r.minX - 12 && x < r.maxX + 12 && z > r.minZ - 12 && z < r.maxZ + 12,
+    );
+
+  let bearing = toGate;
+  for (let step = 0; step <= 90; step++) {
+    const swing = ((step + 1) >> 1) * ((step % 2 === 0 ? 1 : -1) * (Math.PI / 90));
+    const a = toGate + swing;
+    if (clear(CHAIRS_CENTER[0] + Math.cos(a) * distance, CHAIRS_CENTER[1] + Math.sin(a) * distance)) {
+      bearing = a;
+      break;
+    }
+  }
+
+  places.push({
+    id: CHAIRS_TEAM_ID,
+    label: `${CHAIRS_TEAM_NAME} — ${CHAIRS_RIDE_NAME}`,
+    group: "department",
+    position: [
+      CHAIRS_CENTER[0] + Math.cos(bearing) * distance,
+      CHAIRS_HEIGHT * 0.72 + 12,
+      CHAIRS_CENTER[1] + Math.sin(bearing) * distance,
+    ],
+    lookAt: [CHAIRS_CENTER[0], CHAIRS_HEIGHT * 0.42, CHAIRS_CENTER[1]],
+  });
+}
+
+/*
+ * The Super Looper's chip.
+ *
+ * It is signed for UI/UX, so its chip reads the way the Park Train's and the
+ * Flying Chairs' do — team name, then ride name — and sits with the
+ * department chips, after them, because it is a label rather than a routing
+ * destination. The shot is sized from the ride's own reach and height, the
+ * same way every other chip is sized.
+ *
+ * THE BEARING, THOUGH, HAS TO BE SEARCHED. Every other chip frames its subject
+ * from the gate side, which works because every other subject has open ground
+ * between it and the gate. This one does not: it was asked to stand beside the
+ * Roller Coaster, and the line from there back to the entrance runs straight
+ * through the Dragon Ride — so framing it from the gate side would put the
+ * camera inside another ride, which `verify-world.ts` catches and is right to.
+ *
+ * So the bearing walks away from the gate direction, a couple of degrees at a
+ * time and alternating sides, and stops at the first one that stands the
+ * camera in clear air. The first candidate tried is still the gate side, so
+ * nothing about how the other chips are framed changes, and this one only
+ * moves as far as it has to.
+ */
+{
+  const distance = Math.max(LOOPER_REACH * 2.1 + 26, LOOPER_HEIGHT * 1.8 + 24);
+  const toGate = Math.atan2(GATE_Z - LOOPER_CENTER[1], GATE_X - LOOPER_CENTER[0]);
+  const eye = LOOPER_HEIGHT * 0.72 + 12;
+
+  const clear = (x: number, z: number) =>
+    !PARK_LAYOUT.some(
+      (r) => x > r.minX - 12 && x < r.maxX + 12 && z > r.minZ - 12 && z < r.maxZ + 12,
+    );
+
+  let bearing = toGate;
+  for (let step = 0; step <= 90; step++) {
+    const swing = ((step + 1) >> 1) * ((step % 2 === 0 ? 1 : -1) * (Math.PI / 90));
+    const a = toGate + swing;
+    if (clear(LOOPER_CENTER[0] + Math.cos(a) * distance, LOOPER_CENTER[1] + Math.sin(a) * distance)) {
+      bearing = a;
+      break;
+    }
+  }
+
+  places.push({
+    id: LOOPER_RIDE_ID,
+    label: `${LOOPER_TEAM_NAME} — ${LOOPER_RIDE_NAME}`,
+    group: "department",
+    position: [
+      LOOPER_CENTER[0] + Math.cos(bearing) * distance,
+      eye,
+      LOOPER_CENTER[1] + Math.sin(bearing) * distance,
+    ],
+    lookAt: [LOOPER_CENTER[0], LOOPER_HEIGHT * 0.42, LOOPER_CENTER[1]],
+  });
+}
+
+/*
+ * The Tea Cups' chip.
+ *
+ * Signed for Risk, so it reads team-then-ride like the other three team chips
+ * and sits with them.
+ *
+ * ITS BEARING HAS TO BE SEARCHED, for the same reason the Super Looper's does
+ * and even more obviously: this ride was asked to stand BEHIND the UFO
+ * Pendulum, so the gate side of it is, by construction, the pendulum. Framing
+ * it from there would put the camera inside another ride. The bearing
+ * therefore walks away from the gate direction a couple of degrees at a time,
+ * alternating sides, and stops at the first one standing the camera in clear
+ * air — trying the gate side first, so nothing about the other chips changes.
+ */
+{
+  const distance = Math.max(TEACUPS_REACH * 2.1 + 26, TEACUPS_HEIGHT * 1.8 + 24);
+  const toGate = Math.atan2(GATE_Z - TEACUPS_CENTER[1], GATE_X - TEACUPS_CENTER[0]);
+  const clear = (x: number, z: number) =>
+    !PARK_LAYOUT.some(
+      (r) => x > r.minX - 12 && x < r.maxX + 12 && z > r.minZ - 12 && z < r.maxZ + 12,
+    );
+
+  let bearing = toGate;
+  for (let step = 0; step <= 90; step++) {
+    const swing = ((step + 1) >> 1) * ((step % 2 === 0 ? 1 : -1) * (Math.PI / 90));
+    const a = toGate + swing;
+    if (
+      clear(TEACUPS_CENTER[0] + Math.cos(a) * distance, TEACUPS_CENTER[1] + Math.sin(a) * distance)
+    ) {
+      bearing = a;
+      break;
+    }
+  }
+
+  places.push({
+    id: TEACUPS_RIDE_ID,
+    label: `${TEACUPS_TEAM_NAME} — ${TEACUPS_RIDE_NAME}`,
+    group: "department",
+    position: [
+      TEACUPS_CENTER[0] + Math.cos(bearing) * distance,
+      TEACUPS_HEIGHT * 0.72 + 12,
+      TEACUPS_CENTER[1] + Math.sin(bearing) * distance,
+    ],
+    lookAt: [TEACUPS_CENTER[0], TEACUPS_HEIGHT * 0.42, TEACUPS_CENTER[1]],
+  });
+}
+
+/*
+ * The Giga Coaster's chip.
+ *
+ * Named for Finance, so it reads team-then-ride like the other team chips and
+ * sits with them rather than with the facilities. Its subject is three hundred metres across, so `frame()`
+ * stands well back from it — which is the same rule every other chip uses,
+ * simply applied to a bigger thing.
+ */
+{
+  const f = frame(GIGA_CENTER, GIGA_REACH, GIGA_HEIGHT);
+  places.push({ id: GIGA_RIDE_ID, label: GIGA_RIDE_NAME, group: "facility", ...f });
+}
+
+/*
+ * The Dumbo Ride's chip.
+ *
+ * Named for Finance, so it reads team-then-ride like the other team chips and
+ * sits with them rather than with the facilities.
+ *
+ * ITS BEARING IS SEARCHED, exactly as the Tea Cups' is and for exactly the same
+ * reason: this ride was asked to stand BEHIND the UFO Pendulum, so the gate
+ * side of it is the pendulum, and framing it from there stands the camera
+ * inside another ride. The bearing therefore walks away from the gate
+ * direction two degrees at a time, alternating sides, and stops at the first
+ * one that puts the camera in clear air.
+ */
+{
+  const distance = Math.max(DUMBO_REACH * 2.1 + 26, DUMBO_HEIGHT * 1.8 + 24);
+  const toGate = Math.atan2(GATE_Z - DUMBO_CENTER[1], GATE_X - DUMBO_CENTER[0]);
+  const clear = (x: number, z: number) =>
+    !PARK_LAYOUT.some(
+      (r) => x > r.minX - 12 && x < r.maxX + 12 && z > r.minZ - 12 && z < r.maxZ + 12,
+    );
+
+  let bearing = toGate;
+  for (let step = 0; step <= 90; step++) {
+    const swing = ((step + 1) >> 1) * ((step % 2 === 0 ? 1 : -1) * (Math.PI / 90));
+    const a = toGate + swing;
+    if (clear(DUMBO_CENTER[0] + Math.cos(a) * distance, DUMBO_CENTER[1] + Math.sin(a) * distance)) {
+      bearing = a;
+      break;
+    }
+  }
+
+  places.push({
+    id: DUMBO_RIDE_ID,
+    label: `${DUMBO_TEAM_NAME} — ${DUMBO_RIDE_NAME}`,
+    group: "department",
+    position: [
+      DUMBO_CENTER[0] + Math.cos(bearing) * distance,
+      DUMBO_HEIGHT * 0.72 + 12,
+      DUMBO_CENTER[1] + Math.sin(bearing) * distance,
+    ],
+    lookAt: [DUMBO_CENTER[0], DUMBO_HEIGHT * 0.42, DUMBO_CENTER[1]],
   });
 }
 

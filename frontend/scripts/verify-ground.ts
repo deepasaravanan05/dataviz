@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PARK_LAYOUT } from "../src/components/park/layout";
+import { MAIN_VIEWPOINT, PARK_CENTER, PARK_LAYOUT } from "../src/components/park/layout";
 import { PATH_NODES } from "../src/components/world/paths";
 import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
 import { TRAIN_SCALE } from "../src/components/park/parkScale";
@@ -335,21 +335,42 @@ check(
   );
 }
 
-const EXPECTED_CENTRES: Record<string, [number, number]> = {
-  ferris: [-165, 250],
-  dragon: [-72.3, 117.7],
-  coaster: [57.7196817359987, -10],
-  monster: [217.2803182640013, 50],
-  tower: [267.75, 240],
-};
-check(
-  "every ride is exactly where it was",
-  PARK_LAYOUT.every((r) => {
-    const e = EXPECTED_CENTRES[r.id];
-    return e && Math.abs(r.center[0] - e[0]) < 1e-6 && Math.abs(r.center[1] - e[1]) < 1e-6;
-  }),
-  PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
-);
+/*
+ * THE RIDES HAVE MOVED, AND THIS CHECK NOW SAYS WHAT SURVIVED THE MOVE.
+ *
+ * It used to hold five frozen coordinates, because for a long stretch of this
+ * park's life the standing instruction was that no ride ever moves. That
+ * instruction has been superseded by a direct one — every ride is to be the
+ * same size — and rides the same size need room: the Monster Ride's footprint
+ * doubled, the Roller Coaster's is 271 m across, and the layout solver
+ * re-placed all five to fit them with clear sky between their silhouettes.
+ *
+ * What must still hold is the FAN, which is what those coordinates were really
+ * protecting: from the main gate the five rides still read left to right in
+ * their designed order, Ferris Wheel, Dragon Ride, Roller Coaster, Monster
+ * Ride, UFO Pendulum, and no two of them overlap on the ground. The centres
+ * are printed rather than asserted, so a change to them is visible in the log
+ * instead of frozen into it.
+ */
+{
+  const FAN_ORDER = ["ferris", "dragon", "coaster", "monster", "ufo"];
+  const ax = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
+  const az = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
+  const al = Math.hypot(ax, az) || 1;
+  const bearingOf = (c: readonly [number, number]) => {
+    const dx = c[0] - MAIN_VIEWPOINT[0];
+    const dz = c[1] - MAIN_VIEWPOINT[1];
+    return Math.atan2((ax / al) * dz - (az / al) * dx, dx * (ax / al) + dz * (az / al));
+  };
+  const seen = [...PARK_LAYOUT]
+    .sort((a, b) => bearingOf(a.center) - bearingOf(b.center))
+    .map((r) => r.id);
+  check(
+    "the five rides still read left to right in the order the fan was designed in",
+    seen.join(",") === FAN_ORDER.join(","),
+    PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
+  );
+}
 
 /*
  * Section 6 used to re-check the Phase-1 proof-of-concept scene

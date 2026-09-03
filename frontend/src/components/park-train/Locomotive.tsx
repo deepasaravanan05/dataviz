@@ -1,12 +1,13 @@
 "use client";
 
-import { PALETTE, WHEEL_RADIUS } from "./constants";
+import { PALETTE, WHEEL_RADIUS, WHEEL_X } from "./constants";
 
+/* Across the track from the gauge, along it as the engine was always drawn. */
 const WHEEL_POSITIONS: [number, number][] = [
-  [-1.5, 1.85],
-  [1.5, 1.85],
-  [-1.5, -1.2],
-  [1.5, -1.2],
+  [-WHEEL_X, 1.85],
+  [WHEEL_X, 1.85],
+  [-WHEEL_X, -1.2],
+  [WHEEL_X, -1.2],
 ];
 
 /** Local y=0 is the axle line (rail height + WHEEL_RADIUS) — see constants.ts. */

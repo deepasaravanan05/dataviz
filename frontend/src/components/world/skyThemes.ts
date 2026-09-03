@@ -53,7 +53,7 @@ export const SKY_THEMES: Record<SkyTheme, SkyThemeConfig> = {
   sunset: {
     label: "Sunset",
     background: "#6a4a5e",
-    fog: { color: "#6a4a5e", near: 900, far: 4200 },
+    fog: { color: "#6a4a5e", near: 1400, far: 8000 },
     dome: { horizon: "#ff8a45", mid: "#a84f78", zenith: "#2f3363", glow: "#ff6a2a" },
     stars: false,
     orb: { position: [-2100, 420, -1500], core: "#ffd9a0", halo: "#ff9a4a", haloOpacity: 0.3 },
@@ -74,7 +74,7 @@ export const SKY_THEMES: Record<SkyTheme, SkyThemeConfig> = {
   sunrise: {
     label: "Sunrise",
     background: "#7a6a86",
-    fog: { color: "#7a6a86", near: 900, far: 4200 },
+    fog: { color: "#7a6a86", near: 1400, far: 8000 },
     dome: { horizon: "#ffc46b", mid: "#ef8fa6", zenith: "#3f66a8", glow: "#ffb256" },
     stars: false,
     orb: { position: [2200, 380, -1400], core: "#fff0c4", halo: "#ffc06a", haloOpacity: 0.28 },
@@ -98,7 +98,7 @@ export const SKY_THEMES: Record<SkyTheme, SkyThemeConfig> = {
   dark: {
     label: "Dark",
     background: "#05070f",
-    fog: { color: "#0a1020", near: 900, far: 4200 },
+    fog: { color: "#0a1020", near: 1400, far: 8000 },
     dome: { horizon: "#16233d", mid: "#0a1024", zenith: "#03040b", glow: "#3d4f7a" },
     stars: true,
     orb: { position: [-2100, 1250, -1500], core: "#e8f1ff", halo: "#9db6e8", haloOpacity: 0.16 },

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEPARTMENTS } from "@/components/park/departments";
+import { DEPARTMENTS, resolveDepartmentRides } from "@/components/park/departments";
 import { EMPLOYEE_DATASET, type DatasetRow } from "@/simulation/journey/dataset";
 import { BUILTIN_JOURNEY, buildJourney } from "@/simulation/journey/journey";
 import { activateJourney } from "@/simulation/journey/activeJourney";
@@ -7,6 +7,7 @@ import {
   EmployeeUploadError,
   parseEmployeeFile,
 } from "@/simulation/journey/employeeUpload";
+import { repairRoster } from "@/simulation/journey/rosterRepair";
 
 /**
  * Which employee roster the park is showing, and the state of any upload.
@@ -17,11 +18,16 @@ import {
  * activated via `activateJourney()`, which swaps the walking figures, the
  * timeline range, the HUD counts and the ride sign lettering all at once.
  *
- * The swap is transactional. `buildJourney` throws on any roster it cannot
- * honestly animate (inconsistent delay arithmetic, duplicate IDs, a gate lane
- * that cannot admit everyone, a full food court), and the throw is caught
- * HERE, before `activateJourney` runs — so a bad file leaves the park exactly
- * as it was, showing the error next to the upload control instead.
+ * THE UPLOAD ACCEPTS THE FILE. `buildJourney` is still strict — it throws on
+ * any roster it cannot honestly animate — but it is no longer what an uploaded
+ * file is judged by, because a spreadsheet somebody keeps by hand breaks those
+ * rules constantly and innocently. `repairRoster` runs first and hands the
+ * builder rows that satisfy its contract, so what used to come back as an
+ * error about turnstile dwell now comes back as a park, plus a line saying how
+ * many arrivals had to be spaced out to make it one.
+ *
+ * The swap is still transactional: the build is caught HERE, before
+ * `activateJourney` runs, so nothing can leave the park half-swapped.
  */
 export type UploadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -33,11 +39,14 @@ interface EmployeeDataState {
   rows: DatasetRow[] | null;
   error: string | null;
   /**
-   * Departments in the upload that no ride serves. Not fatal — the roster is
-   * still parsed and kept — but worth saying, because these are the rows that
-   * would have nowhere to walk to once the swap is live.
+   * What the reader had to guess and what the roster had to be repaired to do.
+   *
+   * NOT ERRORS. Every one of these is something the upload absorbed rather
+   * than refused — a column recognised by the shape of its values, a repeated
+   * ID made unique, arrivals spaced out to clear the turnstiles — and the
+   * panel shows them so the absorbing is visible instead of silent.
    */
-  unmappedDepartments: string[];
+  notes: string[];
 
   upload: (file: File) => Promise<void>;
   /** Drop the upload and go back to the built-in dataset. */
@@ -46,8 +55,8 @@ interface EmployeeDataState {
 
 /** Everything an upload result carries, back to nothing. A function, so each
  *  reset gets its own array rather than sharing one across resets. */
-function cleared(): Pick<EmployeeDataState, "fileName" | "rows" | "error" | "unmappedDepartments"> {
-  return { fileName: null, rows: null, error: null, unmappedDepartments: [] };
+function cleared(): Pick<EmployeeDataState, "fileName" | "rows" | "error" | "notes"> {
+  return { fileName: null, rows: null, error: null, notes: [] };
 }
 
 export const useEmployeeDataStore = create<EmployeeDataState>((set) => ({
@@ -57,23 +66,24 @@ export const useEmployeeDataStore = create<EmployeeDataState>((set) => ({
   upload: async (file) => {
     set({ status: "loading", ...cleared(), fileName: file.name });
     try {
-      const rows = await parseEmployeeFile(file);
+      const parsed = await parseEmployeeFile(file);
       /*
-       * The swap itself. The uploaded rows go through the SAME builder the
-       * built-in dataset does, so every rule — gate queueing, unique chairs,
-       * sit-equals-delay, existing rides only — applies to an upload too. The
-       * builder throws on a roster it cannot honestly animate, and in that
-       * case `activateJourney` is never reached: the park keeps whatever it
-       * was showing.
+       * Parse, REPAIR, build, activate. The repair is what makes the file the
+       * park's problem rather than the user's: it settles identity, arithmetic
+       * and spacing so the rows meet the builder's contract, and reports what
+       * it did instead of refusing. The builder then applies every rule it
+       * always has — gate queueing, unique chairs, sit-equals-delay, existing
+       * rides only — to an upload exactly as it does to the built-in dataset.
        */
-      const built = buildJourney(rows);
+      const repaired = repairRoster(parsed.rows);
+      const built = buildJourney(repaired.rows);
       activateJourney(built, "upload");
       set({
         status: "ready",
         fileName: file.name,
-        rows,
+        rows: repaired.rows,
         error: null,
-        unmappedDepartments: unmappedDepartments(rows),
+        notes: [...parsed.notes, ...repaired.notes, ...unmappedNote(repaired.rows)],
       });
     } catch (err) {
       set({
@@ -84,7 +94,7 @@ export const useEmployeeDataStore = create<EmployeeDataState>((set) => ({
             ? err.message
             : err instanceof Error && err.message
               ? err.message
-              : "Could not read that file. Check it is a valid spreadsheet.",
+              : "Could not read that file.",
       });
     }
   },
@@ -106,14 +116,19 @@ export function activeDataset(): DatasetRow[] {
 }
 
 /**
- * Departments present in the upload that the park has no ride for.
+ * A word about departments the park has never heard of.
  *
- * Checked against the department-to-ride mapping rather than against the
- * built-in roster's department names: the mapping is what actually decides
- * whether an employee has somewhere to walk to, and a name can be perfectly
- * ordinary yet still have no ride behind it.
+ * NOT A WARNING THAT NOBODY HAS ANYWHERE TO GO — it used to read "No ride
+ * serves: Finance", which was simply untrue: `resolveDepartmentRides` gives
+ * every unknown department one of the five existing attractions, round-robin
+ * in first-seen order, because the standing rule is that a department without
+ * a ride of its own is absorbed by a ride that exists rather than given a new
+ * destination. So the line says which ride took them.
  */
-function unmappedDepartments(rows: DatasetRow[]): string[] {
+function unmappedNote(rows: DatasetRow[]): string[] {
   const known = new Set(DEPARTMENTS.map((d) => d.department));
-  return [...new Set(rows.map((r) => r.department))].filter((d) => !known.has(d));
+  const names = [...new Set(rows.map((r) => r.department))].filter((d) => !known.has(d));
+  if (!names.length) return [];
+  const rides = resolveDepartmentRides(rows.map((r) => r.department));
+  return [names.map((n) => `${n} → ${rides.get(n)!.rideName}`).join(", ")];
 }

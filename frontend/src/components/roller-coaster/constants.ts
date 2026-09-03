@@ -35,30 +35,75 @@ export const RAIL_RADIUS = 0.15;
 export const SPINE_SIZE = 0.34;
 export const TIE_SPACING = 1.35;
 
-/** Number of samples used for rails, frames and support placement. */
-export const TRACK_SEGMENTS = 900;
+/**
+ * Number of samples used for rails, frames and support placement.
+ *
+ * TIED TO THE LENGTH OF THE CIRCUIT, not a bare count. 900 was chosen when the
+ * circuit ran 201.6u, which is 4.46 samples per unit of track, and the rails,
+ * the sleeper spacing, the support pitch and — through TRACK_FRAMES — the
+ * interpolated banking a car reads at an arbitrary point all resolve at that
+ * density. Leaving the count alone while the circuit grew by 39% would have
+ * quietly coarsened every one of them; the cars gave it away first, their
+ * chord through the lift crest closing from 1.71u to 1.67u against a 1.7u car.
+ */
+export const TRACK_SEGMENTS = 1250;
 
 /**
- * Train: 10 cars x 4 seats = 40 seats.
+ * Train: 15 cars x 2 seats = 30 seats.
  *
- * FORTY, DOWN FROM SIXTY. The user asked every ride in the park for a realistic
- * 30-40 seat capacity, with 40 preferred, and the coaster reaches it by
- * shortening the train rather than by re-spacing it: the 2x2 block inside a car
- * is untouched, CAR_SPACING is untouched, and the five cars that come off the
- * back simply leave the consist. Nothing about the track, the station, the
- * supports or the ride's speed changes.
+ * THIRTY, DOWN FROM FORTY, and the count is what decided the layout. Thirty is
+ * not divisible by the 2x2 block the cars used to carry, so rather than leave a
+ * short car on the back the block was halved: every car now carries ONE row of
+ * two, and there are fifteen of them. The 2-across spacing inside a row is
+ * untouched, CAR_LENGTH is untouched, and the car shell, its chassis, wheels
+ * and nose cone are all drawn exactly as before — the change is that the rear
+ * row is gone and five more cars are on the back.
  */
-export const CAR_COUNT = 10;
-export const SEATS_PER_CAR = 4;
+export const CAR_COUNT = 15;
+export const SEATS_PER_CAR = 2;
 export const SEAT_COUNT = CAR_COUNT * SEATS_PER_CAR;
+/** Rows of two in a car. One, now that a car seats a pair. */
+export const ROWS_PER_CAR = SEATS_PER_CAR / 2;
 export const CAR_LENGTH = 1.7;
 /**
  * Spacing is measured along the arc, but neighbouring cars are separated by
- * the straight-line chord, which shortens through tight curvature. The loop
- * compresses the chord to roughly 63% of the arc spacing, so this must stay
- * comfortably above CAR_LENGTH / 0.63 to keep cars from intersecting there.
+ * the straight-line chord, which shortens through tight curvature.
+ *
+ * OPENED FROM 2.95 TO 3.2, and the lift crest is why. A car rides
+ * CAR_RIDE_HEIGHT above the spine along the track's own normal, so the chord
+ * between two cars depends on where that normal points — and the normals come
+ * from a rotation-minimising frame carried around the WHOLE closed circuit.
+ * Rebuilding the return run therefore moved the normals everywhere, including
+ * over the crest, and the chord there closed from 1.712u to 1.666u against a
+ * 1.7u car: touching. At 3.2 it opens to 1.790u, which is the first real
+ * clearance the crest has ever had. Anything below about 3.1 puts it back.
  */
-export const CAR_SPACING = 2.95;
+export const CAR_SPACING = 3.2;
+
+/* ---------------- Where a seat sits inside its car ---------------- */
+/**
+ * ONE PLACE DECIDES THIS, for the same reason SEAT_SURFACE_Y below does.
+ *
+ * `Car.tsx` draws the seats and `simulation/journey/rideKinematics.ts` puts the
+ * riders in them, and each used to carry its own copy of these two offsets. A
+ * copy that is only correct while the seating plan never changes is a bug
+ * waiting for the plan to change, which is exactly what has now happened.
+ */
+/** How far a seat sits either side of the car's centreline. */
+export const SEAT_X = 0.42;
+/** Gap between the centres of two rows, back when a car carried two. */
+export const ROW_PITCH = 0.88;
+
+/**
+ * Where row `row` sits along the car's forward axis, in the car's local frame.
+ *
+ * Rows are spread symmetrically about the car's centre, so a two-row car keeps
+ * the +/-0.44 it has always had and a single-row car seats its pair in the
+ * middle of the shell rather than pushed up against the nose.
+ */
+export function seatRowZ(row: number): number {
+  return ((ROWS_PER_CAR - 1) / 2 - row) * ROW_PITCH;
+}
 
 /** Fraction of the full circuit the train advances per second. */
 export const TRAIN_SPEED = 0.035;

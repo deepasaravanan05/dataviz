@@ -15,7 +15,6 @@
     "verify:monster-motion": "tsx scripts/verify-monster-motion.ts",
     "verify:train-park": "tsx scripts/verify-park-train.ts",
     "verify:dragon": "tsx scripts/verify-dragon-ride.ts",
-    "verify:tower": "tsx scripts/verify-drop-tower.ts",
     "verify:scale": "tsx scripts/verify-park-scale.ts",
     "verify:layout": "tsx scripts/verify-park-layout.ts",
     "verify:zoom": "tsx scripts/verify-double-tap-zoom.ts",
@@ -34,7 +33,13 @@
     "verify:panel": "tsx scripts/verify-ride-panel.ts",
     "verify:boarding": "tsx scripts/verify-boarding.ts",
     "verify:foodcourt": "tsx scripts/verify-food-court.ts",
-    "verify:bench": "tsx scripts/verify-bench.ts"
+    "verify:bench": "tsx scripts/verify-bench.ts",
+    "verify:chairs": "tsx scripts/verify-flying-chairs.ts",
+    "verify:ufo": "tsx scripts/verify-ufo-pendulum.ts",
+    "verify:looper": "tsx scripts/verify-super-looper.ts",
+    "verify:teacups": "tsx scripts/verify-tea-cups.ts",
+    "verify:giga": "tsx scripts/verify-giga-coaster.ts",
+    "verify:dumbo": "tsx scripts/verify-dumbo-ride.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

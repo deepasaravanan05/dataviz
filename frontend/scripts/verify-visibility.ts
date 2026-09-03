@@ -775,7 +775,7 @@ const RIDE_DIRS = [
   "monster-ride",
   "park-train",
   "dragon-ride",
-  "drop-tower",
+  "ufo-pendulum",
 ];
 const rideSources = RIDE_DIRS.flatMap((dir) => {
   const base = join(process.cwd(), "src/components", dir);

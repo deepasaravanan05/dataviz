@@ -7,7 +7,7 @@ import { TimelineControls } from "@/components/hud/TimelineControls";
 import { PlaceNav } from "@/components/hud/PlaceNav";
 import { rideById } from "@/components/park/layout";
 import { SEAT_COLOR_HEX, countSeatColor } from "@/components/roller-coaster/seatManifest";
-import { CAR_COUNT, SEAT_COUNT } from "@/components/roller-coaster/constants";
+import { CAR_COUNT, SEAT_COUNT, SEATS_PER_CAR } from "@/components/roller-coaster/constants";
 
 const LEGEND = [
   { label: "Green", color: SEAT_COLOR_HEX.GREEN, count: countSeatColor("GREEN") },
@@ -28,7 +28,7 @@ export default function RollerCoasterPage() {
       <div className="pointer-events-none absolute left-4 top-16 rounded-xl bg-[#070b14]/82 px-4 py-3 text-white shadow-lg backdrop-blur">
         <div className="text-sm font-semibold tracking-wide">ROLLER COASTER</div>
         <div className="mt-0.5 text-2xl font-bold tabular-nums">{SEAT_COUNT} SEATS</div>
-        <div className="mt-1 text-xs text-white/60">{CAR_COUNT} cars &middot; 4 seats each</div>
+        <div className="mt-1 text-xs text-white/60">{CAR_COUNT} cars &middot; {SEATS_PER_CAR} seats each</div>
         <div className="mt-2 space-y-1 text-xs">
           {LEGEND.map((item) => (
             <div key={item.label} className="flex items-center gap-2">
@@ -52,10 +52,10 @@ export default function RollerCoasterPage() {
           Entrance
         </Link>
         <Link
-          href="/drop-tower"
+          href="/ufo-pendulum"
           className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
         >
-          Drop Tower
+          UFO Pendulum
         </Link>
         <Link
           href="/dragon-ride"

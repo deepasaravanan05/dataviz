@@ -17,6 +17,8 @@ import {
 import {
   CAR_SPACING,
   COASTER_ORIGIN,
+  SEAT_X as COASTER_SEAT_X,
+  seatRowZ as coasterRowZ,
   SEAT_SURFACE_Y as COASTER_SEAT_Y,
   TRAIN_SPEED,
 } from "@/components/roller-coaster/constants";
@@ -62,16 +64,19 @@ import {
 import { swingAngle } from "@/components/dragon-ride/swingKinematics";
 import { DRAGON_RIDERS } from "@/components/dragon-ride/riders";
 
-/* --- Drop Tower ----------------------------------------------------- */
+/* --- UFO Pendulum --------------------------------------------------- */
 import {
-  RIDE_CYCLE_SECONDS as TOWER_CYCLE_SECONDS,
-  SEAT_ANGLE_STEP,
-  SEAT_COUNT as TOWER_SEAT_COUNT,
-  SEAT_RING_R,
-  SEAT_SURFACE_Y as TOWER_SEAT_Y,
-  TOWER_ORIGIN,
-} from "@/components/drop-tower/constants";
-import { gondolaY, structuralShake } from "@/components/drop-tower/dropKinematics";
+  ARM_LENGTH as UFO_ARM_LENGTH,
+  BEARING_Y as UFO_BEARING_Y,
+  SEAT_COUNT as UFO_SEAT_COUNT,
+} from "@/components/ufo-pendulum/constants";
+import { RIDE_FACING as UFO_FACING, RIDE_ORIGIN as UFO_ORIGIN } from "@/components/ufo-pendulum/placement";
+import { SEAT_PLACEMENTS as UFO_SEATS } from "@/components/ufo-pendulum/seatRing";
+import {
+  RIDE_PERIOD as UFO_CYCLE_SECONDS,
+  spinAngle as ufoSpin,
+  armAngle as ufoArm,
+} from "@/components/ufo-pendulum/pendulum";
 
 /**
  * WHERE EVERY RIDE'S SEATS ARE, AT ANY POINT OF THAT RIDE'S OWN ANIMATION.
@@ -221,9 +226,8 @@ function ferrisSeat(index: number, t: number): Matrix4 {
 /* Roller Coaster                                                      */
 /* ------------------------------------------------------------------ */
 
-/** Seat block inside a car — Car.tsx's own 2x2 placement. */
-const COASTER_SEAT_X = 0.42;
-const COASTER_ROW_Z = 0.44;
+/* Where a seat sits inside a car comes from the coaster's own constants, so a
+   rider is placed on the pan Car.tsx actually draws — see SEAT_X / seatRowZ. */
 
 const _car = createCarTransform();
 const _carM = new Matrix4();
@@ -240,7 +244,7 @@ function coasterSeat(index: number, t: number): Matrix4 {
     ...parkPlacement("coaster"),
     T(COASTER_ORIGIN[0], COASTER_ORIGIN[1], COASTER_ORIGIN[2]),
     take().copy(_carM),
-    T(seat.side * COASTER_SEAT_X, COASTER_SEAT_Y, (seat.row === 0 ? 1 : -1) * COASTER_ROW_Z),
+    T(seat.side * COASTER_SEAT_X, COASTER_SEAT_Y, coasterRowZ(seat.row)),
   );
 }
 
@@ -379,16 +383,33 @@ function dragonSeat(index: number, t: number): Matrix4 {
 }
 
 /* ------------------------------------------------------------------ */
-/* Drop Tower                                                          */
+/* UFO Pendulum                                                        */
 /* ------------------------------------------------------------------ */
 
-function towerSeat(index: number, t: number): Matrix4 {
+/*
+ * The machine stacked exactly as it is built and exactly as the component
+ * draws it: stand the ride and turn it to face the entrance, go up to the
+ * bearing, swing the arm about the bearing's axis, drop the arm's length to
+ * the hub, spin the saucer on the hub, and step out to the seat.
+ *
+ * Both motions are functions of the ride's own animation clock, so a seated
+ * employee is carried by exactly what the viewer sees carrying the saucer.
+ * At t = 0 the arm hangs straight down and the saucer is unturned, which is
+ * the pose the boarding deck is solved against.
+ */
+function ufoSeat(index: number, t: number): Matrix4 {
+  const seat = UFO_SEATS[index].position;
   return chain(
-    // The Drop Tower is the one ride outside the scaled group.
-    T(TOWER_ORIGIN[0], TOWER_ORIGIN[1], TOWER_ORIGIN[2]),
-    T(structuralShake(t), gondolaY(t), 0),
-    Ry(index * SEAT_ANGLE_STEP),
-    T(0, TOWER_SEAT_Y, SEAT_RING_R),
+    // Like the Drop Tower it replaced, this ride sits outside the scaled group.
+    T(UFO_ORIGIN[0], UFO_ORIGIN[1], UFO_ORIGIN[2]),
+    Ry(UFO_FACING),
+    T(0, UFO_BEARING_Y, 0),
+    Rz(ufoArm(t)),
+    T(0, -UFO_ARM_LENGTH, 0),
+    Ry(ufoSpin(t)),
+    T(seat[0], seat[1], seat[2]),
+    // The rider faces outward along the seat's own radius.
+    Ry(UFO_SEATS[index].azimuth),
   );
 }
 
@@ -437,11 +458,11 @@ const RIDES: Record<DepartmentRideId, RideKinematics> = {
      */
     period: SWING_PERIOD / 2,
   },
-  tower: {
-    seatCount: TOWER_SEAT_COUNT,
-    seat: towerSeat,
-    // One dwell-lift-hold-fall-brake-settle machine cycle.
-    period: TOWER_CYCLE_SECONDS,
+  ufo: {
+    seatCount: UFO_SEAT_COUNT,
+    seat: ufoSeat,
+    // Three swings of the arm and seven turns of the saucer — see RIDE_PERIOD.
+    period: UFO_CYCLE_SECONDS,
   },
 };
 

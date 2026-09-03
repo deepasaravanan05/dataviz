@@ -1,18 +1,25 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as THREE from "three";
-import { PARK_LAYOUT, rideById } from "../src/components/park/layout";
+import { PARK_LAYOUT } from "../src/components/park/layout";
 import { PARK_SCALE } from "../src/components/park/parkScale";
 import { SKY_THEMES } from "../src/components/world/skyThemes";
 import { COASTER_ORIGIN } from "../src/components/roller-coaster/constants";
 import { DRAGON_ORIGIN } from "../src/components/dragon-ride/constants";
 import { MONSTER_ORIGIN } from "../src/components/monster-ride/constants";
-import { TOWER_ORIGIN } from "../src/components/drop-tower/constants";
+import {
+  RIDE_ORIGIN as UFO_ORIGIN,
+  STRUCTURE_HALF_X as UFO_SOLID_X,
+  STRUCTURE_HALF_Z as UFO_SOLID_Z,
+} from "../src/components/ufo-pendulum/placement";
 import { CAMERA_PLACES, placeById } from "../src/components/world/cameraPlaces";
 import { RIDE_LOOK } from "../src/components/world/rideLighting";
 import { RIDE_PAINT } from "../src/world/ridePaint";
 import { RIDE_DEPARTMENTS } from "../src/components/park/departments";
-import { TOWER_HEIGHT } from "../src/components/drop-tower/constants";
+import {
+  OVERALL_HEIGHT as UFO_HEIGHT,
+  STRUCTURE_HEIGHT as UFO_STRUCTURE_HEIGHT,
+} from "../src/components/ufo-pendulum/constants";
 import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
 import { TRAIN_SCALE } from "../src/components/park/parkScale";
 import { HUMAN } from "../src/world/scale";
@@ -152,7 +159,7 @@ check(
 );
 
 // ============ 3. Six rides, six identities ============
-const SIX = ["coaster", "ferris", "tower", "dragon", "monster", "train"];
+const SIX = ["coaster", "ferris", "ufo", "dragon", "monster", "train"];
 check(
   "all six rides have a lighting identity",
   SIX.every((id) => RIDE_LOOK[id]),
@@ -261,14 +268,14 @@ check(
   "each rig is built from that ride's own published geometry",
   /COASTER_CURVE/.test(rigSrc) &&
     /WHEEL_RADIUS/.test(rigSrc) &&
-    /BAY_COUNT/.test(rigSrc) &&
+    /UFO_FOOT_SPREAD/.test(rigSrc) &&
     /APEX_HEIGHT/.test(rigSrc) &&
     /TRAIN_CURVE/.test(rigSrc),
-  "track curves, rim radii, lattice bays and A-frame spread all read from the rides",
+  "track curves, rim radii, frame splay and A-frame spread all read from the rides",
 );
 check(
   "no rig hand-types a ride's position",
-  /TOWER_ORIGIN/.test(rigSrc) && /DRAGON_ORIGIN/.test(rigSrc) && /MONSTER_ORIGIN/.test(rigSrc),
+  /UFO_ORIGIN/.test(rigSrc) && /DRAGON_ORIGIN/.test(rigSrc) && /MONSTER_ORIGIN/.test(rigSrc),
   "rigs take their origin from the ride they light",
 );
 for (const d of RIDE_DEPARTMENTS) {
@@ -303,20 +310,55 @@ const EXPECTED: Record<string, [number, number]> = {
   dragon: [-72.3, 117.7],
   coaster: [57.7196817359987, -10],
   monster: [217.2803182640013, 50],
-  tower: [267.75, 240],
+  /*
+   * The UFO Pendulum stands on the exact coordinate the Drop Tower held. It
+   * replaced the tower at the user's request rather than being added beside
+   * it, so the four literals above are unchanged — which is what this check
+   * exists to prove.
+   */
+  ufo: [267.75, 240],
 };
 check(
-  "every ride is still at its exact original centre",
-  PARK_LAYOUT.every((r) => {
-    const e = EXPECTED[r.id];
-    return e && Math.abs(r.center[0] - e[0]) < 1e-6 && Math.abs(r.center[1] - e[1]) < 1e-6;
-  }),
+  /*
+   * This check used to compare five frozen coordinates. The park has since
+   * been rebuilt to one common ride size at the user's request, which grew
+   * every footprint and made the solver re-place all five — so the frozen list
+   * would now be asserting that the change did not happen. What it guards
+   * instead is the thing the coordinates protected: the rides are all one size
+   * and none of them overlaps another. Their centres are printed.
+   */
+  "every ride is one size, and no two overlap",
+  PARK_LAYOUT.every((r) => Math.abs(r.height - PARK_LAYOUT[0].height) < 0.01) &&
+    PARK_LAYOUT.every((a) =>
+      PARK_LAYOUT.every(
+        (b) => a === b || a.maxX < b.minX || b.maxX < a.minX || a.maxZ < b.minZ || b.maxZ < a.minZ,
+      ),
+    ),
   PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
-);
+);/*
+ * THE PARK NO LONGER HAS A VERTICAL LANDMARK, and that is a deliberate
+ * consequence rather than a regression to hide.
+ *
+ * This used to assert a 126 m Drop Tower standing 42 m clear of anything else
+ * — a mast you could navigate the whole park by. The user asked for the tower
+ * to go and the UFO Pendulum to take its plot, and a pendulum cannot be that:
+ * the plot's sightlines cap its swept width, its width caps its arm, and its
+ * arm caps how high the arc reaches. That left the pendulum tallest at 86 m
+ * with the Dragon Ride two metres behind it.
+ *
+ * The pendulum has since been asked to come DOWN to pick its riders up, which
+ * on a rigid arm means bringing the pivot down, which means bringing the top
+ * down with it — so the Dragon Ride leads now and the pendulum is a 66 m ride.
+ * The ordering was the last part of the old claim still standing, and it has
+ * stopped being true as well, so what is checked here is what is actually
+ * being lit: a big ride on the tower's plot.
+ */
 check(
-  "the drop tower is the park's vertical landmark",
-  TOWER_HEIGHT >= 100 && PARK_LAYOUT.every((r) => r.id === "tower" || r.height < TOWER_HEIGHT),
-  `${TOWER_HEIGHT} m against a next-tallest of ${Math.max(...PARK_LAYOUT.filter((r) => r.id !== "tower").map((r) => r.height)).toFixed(0)} m`,
+  "the pendulum still lights up as one of the park's big rides, on the plot the tower left",
+  UFO_HEIGHT > 60,
+  `${UFO_HEIGHT.toFixed(0)} m against a tallest of ${Math.max(...PARK_LAYOUT.filter((r) => r.id !== "ufo").map((r) => r.height)).toFixed(0)} m — ` +
+    `the park's 126 m landmark went with the Drop Tower, and the pendulum's own 86 m went ` +
+    `when it came down to load`,
 );
 check(
   "employees are still human, not shrunk to make the rides look big",
@@ -411,15 +453,44 @@ check(
   `x[${loopScreen.minX.toFixed(2)}, ${loopScreen.maxX.toFixed(2)}] y[${loopScreen.minY.toFixed(2)}, ${loopScreen.maxY.toFixed(2)}]`,
 );
 
+/*
+ * WHAT A RIDE HIDES IS WHAT IT IS MADE OF, not the box the layout gives it.
+ *
+ * A ride's layout footprint is its swept envelope, because that is the figure
+ * every clearance has to respect. It is the wrong figure for occlusion: the
+ * UFO Pendulum's box is 82 m across, but the outer twelve metres of it is a
+ * saucer between fifty and a hundred metres in the air, and a neighbour behind
+ * that is not hidden by anything. This used to be handled by exempting rides
+ * whose box was under 20 m — which was the Drop Tower's slender mast, and
+ * stopped being true the moment the mast was replaced by an arc.
+ *
+ * So each ride now publishes what it SOLIDLY occupies where it can hide
+ * something, and the near ride is re-projected at that size before the overlap
+ * is measured. For every ride whose structure fills its box, that is the box,
+ * and nothing changes.
+ */
+const SOLID: Record<string, { hx: number; hz: number; h: number }> = {
+  ufo: { hx: UFO_SOLID_X, hz: UFO_SOLID_Z, h: UFO_STRUCTURE_HEIGHT },
+};
+const solidScreens = new Map<string, Screen>(
+  PARK_LAYOUT.map((r) => {
+    const solid = SOLID[r.id];
+    return [
+      r.id,
+      solid === undefined
+        ? screens.find((s) => s.id === r.id)!
+        : project(r.id, r.label, r.center[0], r.center[1], solid.hx, solid.hz, solid.h),
+    ];
+  }),
+);
+
 let worstCover = 0;
 let worstPair = "";
 for (const near of screens) {
   for (const far of screens) {
     if (near.id === far.id || far.dist <= near.dist) continue;
-    const cover = overlapArea(near, far) / Math.max(area(far), 1e-9);
-    // A slender lattice mast overlaps a bounding box without hiding anything.
-    const slender = Math.max(rideById(near.id).halfX, rideById(near.id).halfZ) < 20;
-    if (!slender && cover > worstCover) {
+    const cover = overlapArea(solidScreens.get(near.id)!, far) / Math.max(area(far), 1e-9);
+    if (cover > worstCover) {
       worstCover = cover;
       worstPair = `${near.label} over ${far.label}`;
     }
@@ -489,8 +560,8 @@ for (const id of SIX) {
   const anchored: [string, number, RegExp][] = [
     ["Roller Coaster", Math.hypot(COASTER_ORIGIN[0], COASTER_ORIGIN[2]),
       /position=\{\[COASTER_ORIGIN\[0\], 0, COASTER_ORIGIN\[2\]\]\}/],
-    ["Drop Tower", Math.hypot(TOWER_ORIGIN[0], TOWER_ORIGIN[2]),
-      /position=\{\[TOWER_ORIGIN\[0\], 0, TOWER_ORIGIN\[2\]\]\}/],
+    ["UFO Pendulum", Math.hypot(UFO_ORIGIN[0], UFO_ORIGIN[2]),
+      /position=\{UFO_ORIGIN\}/],
     ["Dragon Ride", Math.hypot(DRAGON_ORIGIN[0], DRAGON_ORIGIN[2]),
       /const \[ox, , oz\] = DRAGON_ORIGIN/],
     ["Monster Ride", Math.hypot(MONSTER_ORIGIN[0], MONSTER_ORIGIN[2]),

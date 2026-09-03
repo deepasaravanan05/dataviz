@@ -58,10 +58,10 @@ export default function ParkTrainPage() {
           Entrance
         </Link>
         <Link
-          href="/drop-tower"
+          href="/ufo-pendulum"
           className="rounded-full bg-black/65 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-black/80"
         >
-          Drop Tower
+          UFO Pendulum
         </Link>
         <Link
           href="/dragon-ride"

@@ -63,8 +63,25 @@ check("train yaws through horizontal curves", maxYawRate > 0.01, `max yaw step $
 // ---------- Roll / banking + inversion (§24) ----------
 const minUpY = Math.min(...rows.map((r) => r.up.y));
 check("train inverts through the loop", minUpY < -0.8, `min up.y = ${minUpY.toFixed(2)}`);
+/*
+ * MEASURED IN UNITS OF BANKED TRACK, not as a share of the circuit.
+ *
+ * Samples are spaced by arc length, so each one stands for TRACK_LENGTH /
+ * SAMPLES units of track. This used to ask that a tenth of the SAMPLES came
+ * back banked, which was the same question only while the circuit stayed the
+ * length it was when the check was written: the banked elements — the loop's
+ * entry and exit and the turn out of it — are a fixed amount of track, so
+ * extending the ride home dilutes them however well they bank. The 201.6u
+ * circuit carried 20.7u of banked track, and that figure is what the ride has
+ * to keep.
+ */
 const banked = rows.filter((r) => Math.abs(r.up.y) < 0.98 && r.up.y > 0).length;
-check("train banks on turns", banked > SAMPLES * 0.1, `${banked}/${SAMPLES} banked samples`);
+const bankedLength = (banked / SAMPLES) * TRACK_LENGTH;
+check(
+  "train banks on turns",
+  bankedLength > 20.0,
+  `${bankedLength.toFixed(1)}u of banked track (${banked}/${SAMPLES} samples on a ${TRACK_LENGTH.toFixed(1)}u circuit)`,
+);
 
 // ---------- Orthonormal basis: train cannot shear or derail (§22) ----------
 let maxOrthoErr = 0, maxLenErr = 0;

@@ -48,6 +48,39 @@ export const RIDE_CAPACITY = RIDE_RULES.capacity;
  * NOT what gates boarding any more. Nothing in this module reads it.
  */
 export const RIDE_MIN_START_COUNT = RIDE_RULES.minStartCount;
+
+/**
+ * How many people a ride can EVER take on, over the whole simulated day.
+ *
+ * Not the ride's capacity, and not the seats a stopped ride presents: it is
+ * the seats its boarding DECK reaches, capped by the ride. A seat taken on
+ * this park is a seat kept — nobody ever gets off — so a ride's day-long
+ * intake is exactly the deck it loads through, and this is the same
+ * `stair.seats.slice(0, RIDE_CAPACITY)` that `buildRideSchedule` below hands
+ * out, named once so that nothing has to re-derive it and get it wrong.
+ *
+ * It lives here rather than beside `boardingSeats()` in rideKinematics.ts for
+ * a plain reason: the deck is solved in boardingStair.ts, which imports
+ * rideKinematics, so rideKinematics cannot look the other way without a cycle.
+ * This module already depends on both.
+ */
+export function rideIntake(rideId: DepartmentRideId): number {
+  return Math.min(RIDE_CAPACITY, stairFor(rideId).seats.length);
+}
+
+/**
+ * The whole park's intake — a HARD CEILING on any roster.
+ *
+ * `rosterRepair.ts` reads it so an upload larger than the park is trimmed to
+ * what can honestly be shown, with a note saying so, rather than failing deep
+ * inside the builder with one employee's name on it.
+ */
+export function parkIntake(): number {
+  return (Object.keys(BOARDING_STAIRS) as DepartmentRideId[]).reduce(
+    (total, id) => total + rideIntake(id),
+    0,
+  );
+}
 /** Four simulated minutes of running. Unchanged. */
 export const RIDE_RUN_MINUTES = RIDE_RULES.runDurationMinutes;
 

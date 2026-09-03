@@ -21,14 +21,16 @@ export interface SeatSpec {
 }
 
 /**
- * 40 seats across 10 cars (4 per car, matching the reference's 2x2 layout).
- * The colour cycles Green -> Yellow -> Red across the whole train, so with 4
- * seats per car the pattern shifts car to car and never clumps.
+ * 30 seats across 15 cars, a single 2-across row apiece.
+ *
+ * The colour cycles Green -> Yellow -> Red across the whole train, so with two
+ * seats per car the pair in any one car is always two different bands and the
+ * pattern never clumps.
  *
  * The colours are an ALLOCATION order, not a paint job: every seat in the park
  * is grey (see `world/seatColor.ts`), and what a band decides is which seat
- * `findFreeSeat()` reaches for first. With 40 seats the cycle lands 14 / 13 /
- * 13 instead of the old 20 / 20 / 20, which is the same rule at the new count.
+ * `findFreeSeat()` reaches for first. Thirty divides by three exactly, so the
+ * cycle lands 10 / 10 / 10 — the same rule as before, at the new count.
  */
 export const SEATS: SeatSpec[] = Array.from({ length: SEAT_COUNT }, (_, index) => {
   const car = Math.floor(index / SEATS_PER_CAR);
@@ -50,7 +52,7 @@ export function countSeatColor(color: SeatColor): number {
   return SEATS.filter((s) => s.color === color).length;
 }
 
-/** Dev-time validation of the 40-seat requirement. */
+/** Dev-time validation of the 30-seat requirement. */
 export function validateSeats(): void {
   const green = countSeatColor("GREEN");
   const yellow = countSeatColor("YELLOW");

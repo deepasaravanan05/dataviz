@@ -19,7 +19,11 @@ import {
 } from "../src/components/park/layout";
 import { PARK_SCALE, TRAIN_SCALE } from "../src/components/park/parkScale";
 import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { RIDE_REACH as TOWER_REACH, TOWER_HEIGHT, TOWER_ORIGIN } from "../src/components/drop-tower/constants";
+import {
+  OVERALL_HEIGHT as UFO_HEIGHT,
+  OVERALL_REACH as UFO_REACH,
+} from "../src/components/ufo-pendulum/constants";
+import { RIDE_ORIGIN as UFO_ORIGIN } from "../src/components/ufo-pendulum/placement";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -52,7 +56,7 @@ const zs = PARK_LAYOUT.map((r) => ({ label: r.label, z: r.center[1] })).sort((a,
  * Depth stagger — between rides that could actually read as lined up.
  *
  * Sharing a depth line only matters for rides that are near each other across
- * the park. The Drop Tower now stands within 10 m of the Ferris Wheel's depth,
+ * the park. The pendulum now stands within 10 m of the Ferris Wheel's depth,
  * having stepped 40 m back, but the two are 433 m apart in x — opposite ends of
  * the site, and no viewer will ever see them as a row. Comparing every pair
  * regardless of how far apart they are was measuring something that is not the
@@ -145,7 +149,7 @@ function occlusionReport(view: [number, number], camHeight: number, name: string
        *
        * This used to report a ride as hidden the moment the two silhouettes
        * touched at all. On a park of this size that fires on slivers: from the
-       * front-right the Drop Tower clips 0.32 degrees off a Monster Ride that
+       * front-right the pendulum clips a fraction of a degree off a Monster Ride that
        * is 13.4 degrees wide — two per cent of it — and calling that "behind"
        * is not a useful thing to know. A ride is unreadable when a quarter or
        * more of its width is gone, so that is what is measured.
@@ -262,26 +266,45 @@ check(
   PARK_SCALE >= 1.7,
   `PARK_SCALE ${PARK_SCALE}x — visibility was solved with spacing and lighting, never by making rides smaller`,
 );
-const tower = rideById("tower");
+const pendulum = rideById("ufo");
 check(
-  "Drop Tower footprint in the layout matches its own constants",
+  "UFO Pendulum footprint in the layout matches its own constants",
   /* The tower's own module declares its reach UNSCALED. The layout stores the
      rendered footprint, so the two are only comparable through the factor the
      ride is drawn at — which used to be 1.0, and is now 1.2. */
-  Math.abs(tower.halfX - TOWER_REACH * rideScale("tower")) < 1e-9 &&
-    Math.abs(tower.halfZ - TOWER_REACH * rideScale("tower")) < 1e-9,
-  `layout ${tower.halfX.toFixed(2)}u = drop-tower RIDE_REACH ${TOWER_REACH}u ` +
-    `at ${rideScale("tower").toFixed(2)}x`,
+  Math.abs(pendulum.halfX - UFO_REACH * rideScale("ufo")) < 1e-9 &&
+    Math.abs(pendulum.halfZ - UFO_REACH * rideScale("ufo")) < 1e-9,
+  `layout ${pendulum.halfX.toFixed(2)}u = ufo-pendulum OVERALL_REACH ${UFO_REACH.toFixed(2)}u ` +
+    `at ${rideScale("ufo").toFixed(2)}x`,
+);
+/*
+ * THE PARK'S TALLEST RIDE HAS CHANGED HANDS AGAIN, and this claim goes with it
+ * rather than being quietly reworded.
+ *
+ * The Drop Tower held it at 126 m until it was removed. The UFO Pendulum took
+ * the tower's plot and held it at 86 m. The user has now asked that ride to
+ * come DOWN and pick its riders up instead of making them climb thirty-two
+ * metres of stairs to reach it — and on a rigid arm whose length is capped by
+ * the plot, the only way down is to bring the pivot down, which is the same
+ * thing as bringing the top down. So the Dragon Ride is the tallest ride in
+ * the park now, and the pendulum stands a little under it.
+ *
+ * What is still worth asserting is that the pendulum is a big ride and that
+ * nothing about its FOOTPRINT changed — that is the number the park was laid
+ * out against, and it is untouched.
+ */
+check(
+  "the pendulum's height changed and its footprint did not — so no ride moved",
+  UFO_HEIGHT > 60 &&
+    Math.abs(pendulum.halfX - UFO_REACH * rideScale("ufo")) < 1e-9,
+  `pendulum ${UFO_HEIGHT.toFixed(1)}u over the top against a tallest other of ` +
+    `${Math.max(...PARK_LAYOUT.filter((r) => r.id !== "ufo").map((r) => r.height)).toFixed(1)}u, ` +
+    `on the same ${pendulum.halfX.toFixed(2)}u footprint it was placed by`,
 );
 check(
-  "Drop Tower is still the tallest thing in the park",
-  TOWER_HEIGHT > 100 && PARK_LAYOUT.every((r) => r.id === "tower" || r.height < TOWER_HEIGHT),
-  `tower ${TOWER_HEIGHT}u vs tallest other ${Math.max(...PARK_LAYOUT.filter((r) => r.id !== "tower").map((r) => r.height)).toFixed(1)}u`,
-);
-check(
-  "Drop Tower renders where the layout put it",
-  Math.abs(TOWER_ORIGIN[0] - tower.center[0]) < 1e-9 && Math.abs(TOWER_ORIGIN[2] - tower.center[1]) < 1e-9,
-  `(${TOWER_ORIGIN[0].toFixed(2)}, ${TOWER_ORIGIN[2].toFixed(2)})`,
+  "UFO Pendulum renders where the layout put it",
+  Math.abs(UFO_ORIGIN[0] - pendulum.center[0]) < 1e-9 && Math.abs(UFO_ORIGIN[2] - pendulum.center[1]) < 1e-9,
+  `(${UFO_ORIGIN[0].toFixed(2)}, ${UFO_ORIGIN[2].toFixed(2)})`,
 );
 
 // ============ 8. The solver actually works ============

@@ -13,8 +13,15 @@ import { DATASET_DEPARTMENTS } from "@/simulation/journey/dataset";
  * standing instruction is that employees whose department has no ride of its
  * own are converted to one of the EXISTING rides — never to a new destination.
  * So the four departments with a ride each keep it, and UI/UX shares the
- * Ferris Wheel with IT Support. A shared ride carries both department names on
- * its sign, which is why the Ferris Wheel reads "IT Support · UI/UX".
+ * Ferris Wheel with IT Support.
+ *
+ * WHAT THE SIGNS SAY IS A SEPARATE QUESTION. The user gave the park its own
+ * names for two of the rides — the Roller Coaster is "Testing" and the Ferris
+ * Wheel is "Developers" — and those live in RIDE_SIGN_NAME below. They are
+ * DISPLAY names only. The mapping here, the dataset rows, and every place a
+ * PERSON's own department is shown are untouched, so Tech people still ride
+ * the Roller Coaster and still read as Tech in the employee panel, the food
+ * court list and the dashboard table.
  *
  * No ride is added, removed, moved or resized to fit a department. If a future
  * roster brings a seventh department it joins an existing ride here, and
@@ -22,7 +29,7 @@ import { DATASET_DEPARTMENTS } from "@/simulation/journey/dataset";
  */
 
 /** The ids the park layout already uses for its five attractions. */
-export type DepartmentRideId = "coaster" | "dragon" | "ferris" | "tower" | "monster";
+export type DepartmentRideId = "coaster" | "dragon" | "ferris" | "ufo" | "monster";
 
 /** One department, spelled exactly as the dataset spells it. */
 export interface DepartmentInfo {
@@ -35,7 +42,7 @@ const DEPARTMENT_MAPPING: Record<string, DepartmentRideId> = {
   Tech: "coaster",
   "Cyber Security": "dragon",
   ERP: "monster",
-  "Data Engineering": "tower",
+  "Data Engineering": "ufo",
   "IT Support": "ferris",
   "UI/UX": "ferris",
 };
@@ -53,18 +60,49 @@ export function rideForDepartment(department: string): DepartmentInfo {
   return found;
 }
 
+/**
+ * Rides that announce a name of the user's choosing rather than the department
+ * names underneath them.
+ *
+ * The Roller Coaster serves Tech and is signed "Testing"; the Ferris Wheel
+ * serves IT Support and UI/UX and is signed "Developers" instead of joining
+ * both. The other three already carry their department's own name, so they are
+ * absent here and fall through to the join below.
+ *
+ * Nothing that counts, colours, seats or routes an employee reads this map, so
+ * a ride's roster, its queue and its arithmetic are identical either way.
+ */
+const RIDE_SIGN_NAME: Partial<Record<DepartmentRideId, string>> = {
+  coaster: "Testing",
+  ferris: "Developers",
+};
+
+/**
+ * What a ride prints as its department — its sign name if it has one, else its
+ * departments joined the way every surface in the park joins them.
+ *
+ * Takes the department list as an argument so the live roster (an upload can
+ * rename or re-split a department) resolves through exactly the same rule as
+ * the built-in dataset does. This is the single rule; no surface joins names
+ * for itself, or the plaza sign and the click-through panel would disagree
+ * after an upload.
+ */
+export function departmentDisplayName(rideId: DepartmentRideId, departments: string[]): string {
+  return RIDE_SIGN_NAME[rideId] ?? departments.join(" · ");
+}
+
 /** A ride together with every department it serves. */
 export interface DepartmentRide {
   rideId: DepartmentRideId;
   /** All departments this ride serves, in dataset order. */
   departments: string[];
-  /** The departments joined for display — what signs and panels print. */
+  /** What signs and panels print: the ride's sign name, else its departments joined. */
   department: string;
   /** The ride's existing name, taken from the park layout. */
   rideName: string;
 }
 
-export const RIDE_ORDER: DepartmentRideId[] = ["coaster", "dragon", "ferris", "tower", "monster"];
+export const RIDE_ORDER: DepartmentRideId[] = ["coaster", "dragon", "ferris", "ufo", "monster"];
 
 /**
  * The department → ride mapping for an ARBITRARY roster, e.g. an upload.
@@ -98,7 +136,7 @@ export const RIDE_DEPARTMENTS: DepartmentRide[] = RIDE_ORDER.map((rideId) => {
   return {
     rideId,
     departments,
-    department: departments.join(" · "),
+    department: departmentDisplayName(rideId, departments),
     rideName: rideById(rideId).label,
   };
 });

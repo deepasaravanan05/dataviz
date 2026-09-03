@@ -37,8 +37,19 @@ export const RIDE_PAINT = {
   ferris: { light: "#2f8fd0", mid: "#2470a6", dark: "#17527a" },
   /** Roller Coaster — magenta, matching its blue/magenta LED run. */
   coaster: { light: "#d2409a", mid: "#a72f78", dark: "#7a2156" },
-  /** Drop Tower — purple, matching its purple/violet LED run. */
-  tower: { light: "#7e4ad2", mid: "#6236a8", dark: "#46257a" },
+  /**
+   * UFO Pendulum — purple, matching its purple/violet LED run.
+   *
+   * This is the Drop Tower's old slot, inherited whole when the pendulum
+   * replaced it. The hue is kept rather than repicked because the park's six
+   * identities were spaced around the wheel together: the pendulum's own
+   * orange sits 12 degrees from the railway's amber and its saucer cyan a
+   * degree from the Ferris Wheel's, so either would have collapsed a
+   * separation the whole system depends on. The saucer keeps its seven-colour
+   * skirt — that is where this ride's colour lives — and its STRUCTURE takes
+   * the violet, which is exactly the split this module is for.
+   */
+  ufo: { light: "#7e4ad2", mid: "#6236a8", dark: "#46257a" },
   /** Dragon Swing Ship — red, matching its red/orange LED run. */
   dragon: { light: "#d93a2f", mid: "#ad2a21", dark: "#821e17" },
   /** Monster Ride — green, matching its green/teal LED run. */

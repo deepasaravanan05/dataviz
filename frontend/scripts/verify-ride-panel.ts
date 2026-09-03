@@ -282,7 +282,7 @@ check(
 );
 check(
   "the panel cannot touch a ride",
-  !/components\/(roller-coaster|ferris-wheel|monster-ride|park-train|dragon-ride|drop-tower)/.test(panel),
+  !/components\/(roller-coaster|ferris-wheel|monster-ride|park-train|dragon-ride|ufo-pendulum)/.test(panel),
   "no ride module is imported, so no ride model, position, size or animation is reachable from here",
 );
 

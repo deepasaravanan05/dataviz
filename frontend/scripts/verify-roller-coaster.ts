@@ -36,8 +36,8 @@ const red = countSeatColor("RED");
  * even and that they account for every seat, not that they are 20 apiece.
  */
 check(
-  "capacity is in the 30-40 band, at the preferred 40",
-  SEATS.length >= 30 && SEATS.length <= 40,
+  "capacity is in the 30-40 band, at the 30 the coaster was asked for",
+  SEATS.length === 30,
   `${SEATS.length} seats`,
 );
 check(
@@ -79,6 +79,55 @@ check("track contains an inversion", minNormalY < -0.5, `min frame normal y=${mi
 // Train fits on the circuit without wrapping onto itself
 const trainLength = CAR_COUNT * CAR_SPACING;
 check("train shorter than circuit", trainLength < TRACK_LENGTH * 0.5, `train ${trainLength.toFixed(1)}u vs track ${TRACK_LENGTH.toFixed(1)}u`);
+
+/* ---------- The circuit was LENGTHENED, and paid for it out of its own
+   footprint (§ the brief that asked for a longer ride) ----------
+
+   201.6u is what the ride ran before the return run was rebuilt into three
+   passes. The requirement is not "279.6" — it is that the circuit is
+   materially longer than it was and that nothing else grew to allow it. */
+const PREVIOUS_LENGTH = 201.59;
+check(
+  "the circuit is materially longer than the single-pass version",
+  TRACK_LENGTH > PREVIOUS_LENGTH * 1.25,
+  `${TRACK_LENGTH.toFixed(1)}u vs ${PREVIOUS_LENGTH}u before (+${(((TRACK_LENGTH / PREVIOUS_LENGTH) - 1) * 100).toFixed(0)}%)`,
+);
+
+/* The declared footprint in park/layout.ts, in this local space. The coaster
+   stands at exactly the 12u minimum spacing from the Monster Ride, so a
+   circuit that spilled out of its own box would eat that clearance. */
+const BOX = { minX: -30, maxX: 34, minZ: -24, maxZ: 24 };
+const inBox =
+  Math.min(...TRACK_POINTS.map((p) => p.x)) >= BOX.minX &&
+  Math.max(...TRACK_POINTS.map((p) => p.x)) <= BOX.maxX &&
+  Math.min(...TRACK_POINTS.map((p) => p.z)) >= BOX.minZ &&
+  Math.max(...TRACK_POINTS.map((p) => p.z)) <= BOX.maxZ;
+check(
+  "the longer circuit stays inside the footprint the park already gave it",
+  inBox,
+  `x ${Math.min(...TRACK_POINTS.map((p) => p.x)).toFixed(1)}..${Math.max(...TRACK_POINTS.map((p) => p.x)).toFixed(1)}, ` +
+    `z ${Math.min(...TRACK_POINTS.map((p) => p.z)).toFixed(1)}..${Math.max(...TRACK_POINTS.map((p) => p.z)).toFixed(1)}`,
+);
+
+/* Three passes across one plot only work if they clear each other. Points more
+   than 10u apart ALONG the track must stay apart in space; 5.71u is what the
+   old single-pass circuit managed, at the lift hill beside the first drop. */
+{
+  const step = TRACK_LENGTH / TRACK_SEGMENTS;
+  const apart = Math.ceil(10 / step);
+  let nearest = Infinity;
+  for (let i = 0; i < TRACK_SEGMENTS; i++) {
+    for (let j = i + 1; j < TRACK_SEGMENTS; j++) {
+      if (Math.min(j - i, TRACK_SEGMENTS - (j - i)) < apart) continue;
+      nearest = Math.min(nearest, TRACK_POINTS[i].distanceTo(TRACK_POINTS[j]));
+    }
+  }
+  check(
+    "the circuit never crowds itself",
+    nearest >= 5.7,
+    `closest approach between distant parts of the track ${nearest.toFixed(2)}u`,
+  );
+}
 
 // ---------- Separation from the Ferris Wheel (§2, §22, §26) ----------
 const origin = new Vector3(...COASTER_ORIGIN);

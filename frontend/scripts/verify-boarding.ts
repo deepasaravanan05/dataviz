@@ -904,7 +904,7 @@ const NINE_THIRTY = 9 * 60 + 30;
       /*
        * Two centimetres, against employees who are 3.5 m tall.
        *
-       * The floor is not zero because the Drop Tower's own motion model does
+       * The floor is not zero because the pendulum's own motion model does
        * not reach its resting height in finite time: `gondolaY` ends its cycle
        * with a damped settle, so a whole cycle later the car is still 3.7 mm
        * above rest and lands exactly on it only at the cycle boundary. That is
@@ -1072,7 +1072,7 @@ const NINE_THIRTY = 9 * 60 + 30;
         ["roller-coaster", "Car.tsx"],
         ["monster-ride", "Gondola.tsx"],
         ["dragon-ride", "Ship.tsx"],
-        ["drop-tower", "Gondola.tsx"],
+        ["ufo-pendulum", "Saucer.tsx"],
       ] as const;
       return seatCarriers.every(
         ([dir, file]) => !/<Seated(Rider|Employee)\b/.test(read("src", "components", dir, file)),
@@ -1082,9 +1082,9 @@ const NINE_THIRTY = 9 * 60 + 30;
   );
   check(
     "the seats themselves are still there, and still grey",
-    /<SeatShell/.test(read("src", "components", "drop-tower", "Gondola.tsx")) &&
+    /<Seat color=/.test(read("src", "components", "ufo-pendulum", "Saucer.tsx")) &&
       /<Seat \/>/.test(read("src", "components", "dragon-ride", "Ship.tsx")) &&
-      /SEAT_GREY/.test(read("src", "components", "drop-tower", "Gondola.tsx")),
+      /SEAT_GREY/.test(read("src", "components", "ufo-pendulum", "parts.ts")),
     "only the passengers who never moved are gone — the seat furniture is untouched",
   );
 }
@@ -1173,7 +1173,7 @@ const NINE_THIRTY = 9 * 60 + 30;
     ["Roller Coaster car", ["src", "components", "roller-coaster", "Car.tsx"]],
     ["Monster Ride tub", ["src", "components", "monster-ride", "SeatedEmployee.tsx"]],
     ["Dragon Ship deck", ["src", "components", "dragon-ride", "Ship.tsx"]],
-    ["Drop Tower gondola", ["src", "components", "drop-tower", "Gondola.tsx"]],
+    ["UFO Pendulum saucer", ["src", "components", "ufo-pendulum", "Saucer.tsx"]],
     ["Park Train carriage", ["src", "components", "park-train", "Carriage.tsx"]],
   ];
   const bandColoured: string[] = [];
@@ -1265,7 +1265,7 @@ check(
 );
 check(
   "no ride keeps its own real-time clock any more",
-  ["ferris-wheel/FerrisWheel.tsx", "dragon-ride/DragonRide.tsx", "drop-tower/DropTower.tsx", "monster-ride/MonsterRide.tsx", "roller-coaster/Train.tsx"].every(
+  ["ferris-wheel/FerrisWheel.tsx", "dragon-ride/DragonRide.tsx", "ufo-pendulum/UfoPendulum.tsx", "monster-ride/MonsterRide.tsx", "roller-coaster/Train.tsx"].every(
     (f) => {
       const src = read("src", "components", ...f.split("/"));
       return /rideAnimationSecondsNow/.test(src) && !/elapsed\.current \+=/.test(src);

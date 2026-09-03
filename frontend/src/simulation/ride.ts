@@ -7,11 +7,11 @@ const SEAT_COLORS: SeatColor[] = ["GREEN", "YELLOW", "RED"];
  *
  * FORTY, DOWN FROM SIXTY. Every ride in the park was asked for a realistic
  * capacity between thirty and forty, with forty preferred, and each one now
- * carries exactly that many physical seats — forty cabins on the Ferris Wheel,
- * ten coaster cars of four, forty around the Drop Tower's ring, ten rows of
- * four on the Dragon's deck, twenty Monster tubs of two, and four train cars of
- * ten. This is the simulation's own declaration of the same number, so what the
- * ride pages print as "capacity" is the seating that is actually there.
+ * carries a capacity in that band — forty cabins on the Ferris Wheel, fifteen
+ * coaster cars of two, forty around the Drop Tower's ring, ten rows of four on
+ * the Dragon's deck, twenty Monster tubs of two, and four train cars of ten.
+ * This is the simulation's own ceiling; each ride's real seating is declared by
+ * its own geometry (`rideSeatCount()`), and the coaster now seats thirty.
  *
  * The three bands divide it as evenly as forty divides by three: 14 / 13 / 13.
  * They are an ALLOCATION order and not a paint job — every seat in the park is

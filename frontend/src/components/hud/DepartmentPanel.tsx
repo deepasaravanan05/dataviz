@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRideSelectionStore } from "@/store/rideSelectionStore";
 import { useJourneyStore } from "@/store/journeyStore";
 import { useActiveJourneyStore } from "@/simulation/journey/activeJourney";
-import type { DepartmentRideId } from "@/components/park/departments";
+import { departmentDisplayName, type DepartmentRideId } from "@/components/park/departments";
 import type { JourneyEmployee } from "@/simulation/journey/journey";
 import { formatSimTime } from "@/simulation/clock";
 
@@ -118,16 +118,21 @@ function PanelBody({
    * the roster rather than off a constant, so an upload that renames or
    * re-splits a department is reflected here. The park has five rides and the
    * dataset six departments — IT Support and UI/UX share the Ferris Wheel —
-   * so a ride can legitimately name more than one, joined the way every other
-   * surface in the park joins them.
+   * so a ride can legitimately name more than one.
+   *
+   * The joining is not done here: `departmentDisplayName` is the single rule
+   * the whole park uses, so a ride with a sign name of its own (the Ferris
+   * Wheel is signed "Developers", the Roller Coaster "Testing") prints that
+   * here too, and every other ride prints its departments joined exactly as
+   * its signboard does.
    */
   const department = useMemo(() => {
     const seen: string[] = [];
     for (const e of departmentEmployees) {
       if (!seen.includes(e.department)) seen.push(e.department);
     }
-    return seen.length > 0 ? seen.join(" · ") : fallbackDepartment;
-  }, [departmentEmployees, fallbackDepartment]);
+    return seen.length > 0 ? departmentDisplayName(rideId, seen) : fallbackDepartment;
+  }, [departmentEmployees, fallbackDepartment, rideId]);
 
   /*
    * WHO HAS ACTUALLY STARTED WORK.

@@ -17,7 +17,11 @@
  *      nonsense, which is what the upload store shows as the error message;
  *   5. the wiring exists: the store activates the build, the figures/HUD/
  *      timeline read the ACTIVE journey, and the journey builder still knows
- *      nothing about the upload.
+ *      nothing about the upload;
+ *   6. every roster section 4 proves the BUILDER rejects is accepted by the
+ *      PARK, because `repairRoster()` runs in front of it and hands it rows it
+ *      can honestly animate. Both halves have to hold at once: the builder
+ *      must stay strict, and the upload must stop failing.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -30,6 +34,13 @@ import {
 } from "../src/simulation/journey/journey";
 import { EMPLOYEE_DATASET, type DatasetRow } from "../src/simulation/journey/dataset";
 import { RIDE_ORDER, rideForDepartment } from "../src/components/park/departments";
+import { repairRoster } from "../src/simulation/journey/rosterRepair";
+import { parkIntake } from "../src/simulation/journey/rideOps";
+import {
+  detectDelimiter,
+  parseCsv,
+  rowsFromGrid,
+} from "../src/simulation/journey/employeeUpload";
 import {
   FOOD_COURT_CHAIRS,
   GATE_Z,
@@ -244,14 +255,31 @@ throws(
 );
 
 throws(
-  "a food court beyond its 80 chairs is rejected",
-  Array.from({ length: 100 }, (_, i) =>
-    // One shared check-in minute would trip the lane guard first, so spread
-    // arrivals a minute apart with delays long enough that nobody has left
-    // their chair by the time the hundredth diner reaches the door.
+  `a food court beyond its ${FOOD_COURT_CHAIRS.length} chairs is rejected`,
+  /*
+   * One shared check-in minute would trip the lane guard first, so arrivals
+   * are spread a minute apart with delays long enough that nobody has left
+   * their chair by the time the last diner reaches the door.
+   *
+   * The roster is deliberately kept inside the park's own intake. It used to
+   * be a hundred rows, which the builder now refuses one guard EARLIER — for
+   * having more people than the rides can ever seat — and a test that trips a
+   * different guard than the one it is named for proves nothing. Half the
+   * park's intake is comfortably more than the court has chairs, so this still
+   * fails exactly where it is meant to.
+   */
+  Array.from({ length: FOOD_COURT_CHAIRS.length + 10 }, (_, i) =>
     row(`FULL${i}`, `Diner ${i}`, "Tech", M(9, 0) + i, 300, M(20, 0) + i),
   ),
   /full|nowhere to sit/,
+);
+
+throws(
+  "and a roster beyond the seating the rides have is rejected too",
+  Array.from({ length: parkIntake() + 1 }, (_, i) =>
+    row(`OVER${i}`, `Over ${i}`, "Tech", M(9, 0) + i * 2, 0, M(18, 0) + i),
+  ),
+  /no seat left/,
 );
 
 /* ---------- 5. The wiring is present, and the builder stays clean ---------- */
@@ -269,8 +297,10 @@ check(
 );
 check(
   "the upload store builds and ACTIVATES the roster — the missing wire",
-  /buildJourney\(rows\)/.test(storeSrc) && /activateJourney\(/.test(storeSrc),
-  "parse → build → activate, with the throw caught before activation",
+  /buildJourney\(repaired\.rows\)/.test(storeSrc) &&
+    /repairRoster\(parsed\.rows\)/.test(storeSrc) &&
+    /activateJourney\(/.test(storeSrc),
+  "parse → repair → build → activate, with the throw caught before activation",
 );
 check(
   "reset returns to the built-in journey through the same swap path",
@@ -291,6 +321,190 @@ check(
   "a swap re-bounds the shared clock and releases selection and camera",
   /setJourneyClockBounds\(/.test(activeSrc) && /release\(\)/.test(activeSrc) && /reset\(\)/.test(activeSrc),
   "no stale follow target, no clock outside the new day",
+);
+
+/* ---------- 6. And the PARK accepts every one of them, repaired ---------- */
+
+/*
+ * Section 4 is the builder's contract and it must not soften: a roster whose
+ * own arithmetic contradicts itself, or that seats two people in one chair,
+ * cannot be drawn honestly and the builder is right to refuse it.
+ *
+ * But the upload was asked to accept whatever file is handed to it, and a
+ * spreadsheet kept by hand breaks those rules constantly and innocently. So
+ * `repairRoster()` sits in FRONT of the builder and turns each of those same
+ * rosters into one it will take. Reusing section 4's rosters verbatim is the
+ * point — anything the builder rejects, the park must still open with.
+ */
+
+function accepts(label: string, rows: DatasetRow[]) {
+  const repaired = repairRoster(rows);
+  let built: ReturnType<typeof buildJourney> | null = null;
+  let threw: string | null = null;
+  try {
+    built = buildJourney(repaired.rows);
+  } catch (err) {
+    threw = err instanceof Error ? err.message : String(err);
+  }
+  check(
+    label,
+    threw === null && built !== null && built.employees.length === repaired.rows.length,
+    threw
+      ? `still threw: "${threw.slice(0, 80)}"`
+      : `${built!.employees.length} employees walk` +
+        (repaired.notes.length ? ` — ${repaired.notes.join("; ")}` : " — nothing needed fixing"),
+  );
+}
+
+accepts("a self-contradicting delay is repaired, not refused", [
+  { ...row("BAD1", "Bad Row", "Tech", M(9, 0), 10, M(18, 0)), workStart: M(9, 5) },
+]);
+accepts("a duplicated employee id is repaired, not refused", [
+  row("DUP1", "First", "Tech", M(9, 0), 0, M(18, 0)),
+  row("DUP1", "Second", "ERP", M(9, 30), 0, M(18, 30)),
+]);
+accepts(
+  "a gate lane clash is repaired, not refused",
+  Array.from({ length: 10 }, (_, i) =>
+    row(`LANE${i}`, `Lane ${i}`, "Tech", i === 9 ? M(9, 0) : M(9, 0) + i * 20, 0, M(18, 0) + i),
+  ),
+);
+accepts(
+  `${FOOD_COURT_CHAIRS.length + 10} diners for ${FOOD_COURT_CHAIRS.length} chairs is repaired, not refused`,
+  Array.from({ length: FOOD_COURT_CHAIRS.length + 10 }, (_, i) =>
+    row(`FULL${i}`, `Diner ${i}`, "Tech", M(9, 0) + i, 300, M(20, 0) + i),
+  ),
+);
+accepts(
+  `a roster of 400 for a park that seats ${parkIntake()} is repaired, not refused`,
+  Array.from({ length: 400 }, (_, i) =>
+    row(`BIG${i}`, `Big ${i}`, RIDE_ORDER[i % RIDE_ORDER.length], M(9, 0) + i * 2, (i % 5) * 9, M(18, 0) + i),
+  ),
+);
+accepts(
+  "a whole department sent to one ride is repaired, not refused",
+  Array.from({ length: 60 }, (_, i) =>
+    row(`ITS${i}`, `IT ${i}`, "IT Support", M(9, 0) + i * 2, (i % 4) * 11, M(18, 0) + i),
+  ),
+);
+
+/*
+ * The repair is a repair, not a rewrite. An employee's DELAY is the whole
+ * point of the park — it picks their seat colour and decides whether they sit
+ * in the food court — so a row that was already consistent must come back with
+ * the same delay it went in with, however far its clock had to move to clear a
+ * turnstile.
+ */
+{
+  const before = Array.from({ length: 40 }, (_, i) =>
+    row(`KEEP${i}`, `Keep ${i}`, "Tech", M(9, 0) + (i % 3), (i % 7) * 6, M(18, 0) + i),
+  );
+  const after = repairRoster(before);
+  const byId = new Map(after.rows.map((r) => [r.id, r]));
+  const kept = before.every((r) => byId.get(r.id)?.delayMinutes === r.delayMinutes);
+  const forward = before.every((r) => (byId.get(r.id)?.checkIn ?? 0) >= r.checkIn);
+  check(
+    "every delay survives the repair unchanged, and no clock ever runs backwards",
+    kept && forward && after.rows.length === before.length,
+    `${after.rows.length} rows kept; ${after.repairs.shiftedArrivals} arrivals moved, all forwards`,
+  );
+}
+
+/* The upload panel must be able to say what it did. */
+{
+  const noisy = repairRoster([
+    row("SAME", "One", "Tech", M(9, 0), 0, M(18, 0)),
+    row("SAME", "Two", "Tech", M(9, 0), 0, M(18, 0)),
+  ]);
+  check(
+    "and what it changed comes back in words the panel can show",
+    noisy.notes.length > 0 && noisy.notes.every((n) => typeof n === "string" && n.length > 0),
+    noisy.notes.join("; "),
+  );
+}
+
+/* ---------- 7. The parser takes the file whatever it looks like ---------- */
+
+/*
+ * The grid-level parser is exercised directly here rather than through
+ * `parseEmployeeFile`, which needs a browser `File`. `rowsFromGrid` is the
+ * function every branch of that entry point funnels into, so a grid it reads
+ * is a file the park reads.
+ */
+
+function reads(label: string, grid: unknown[][], expected: number) {
+  const notes: string[] = [];
+  const rows = rowsFromGrid(grid, notes);
+  let threw: string | null = null;
+  try {
+    buildJourney(repairRoster(rows).rows);
+  } catch (err) {
+    threw = err instanceof Error ? err.message : String(err);
+  }
+  check(
+    label,
+    rows.length === expected && threw === null,
+    `${rows.length}/${expected} rows` + (threw ? `, then threw "${threw.slice(0, 60)}"` : ", and the park opens"),
+  );
+}
+
+reads(
+  "a sheet with the columns named anything at all",
+  [
+    ["Staff No", "Full Name", "Team", "Swipe In", "Started Work", "Swipe Out"],
+    ["A1", "Asha Rao", "Tech", "09:02", "09:02", "17:30"],
+    ["A2", "Vikram Das", "Finance", "09:14", "09:41", "18:00"],
+  ],
+  2,
+);
+reads(
+  "a sheet with no header row at all",
+  [
+    ["A1", "Asha Rao", "Tech", "09:02", "09:02", "17:30"],
+    ["A2", "Vikram Das", "Finance", "09:14", "09:41", "18:00"],
+  ],
+  2,
+);
+reads(
+  "a sheet with a title and a blank line before the table",
+  [
+    ["Attendance — March"],
+    [],
+    ["ID", "Name", "Department", "Check In", "Work Start", "Check Out"],
+    ["A1", "Asha Rao", "Tech", "9:02 am", "9:02 am", "5:30 pm"],
+    ["A2", "Vikram Das", "Finance", "9:14 am", "9:41 am", "6:00 pm"],
+  ],
+  2,
+);
+reads(
+  "a sheet with nothing but names and times — no id, no department, no check-out",
+  [
+    ["Name", "In", "Start"],
+    ["Asha Rao", "09:02", "09:02"],
+    ["Vikram Das", "09:14", "09:41"],
+  ],
+  2,
+);
+reads(
+  "a sheet with a delay column instead of a start time",
+  [
+    ["ID", "Name", "Department", "Check In", "Late By", "Check Out"],
+    ["A1", "Asha Rao", "Tech", "09:02", "No Delay", "17:30"],
+    ["A2", "Vikram Das", "Finance", "09:14", "27 min", "18:00"],
+  ],
+  2,
+);
+check(
+  "a delimiter is worked out from the file, not from its name",
+  detectDelimiter("a;b;c\n1;2;3\n") === ";" &&
+    detectDelimiter("a\tb\tc\n1\t2\t3\n") === "\t" &&
+    detectDelimiter("a,b,c\n1,2,3\n") === ",",
+  "semicolon, tab and comma files all read",
+);
+check(
+  "quoted commas inside a field do not split it",
+  parseCsv('id,name\n"A1","Rao, Asha"\n')[1][1] === "Rao, Asha",
+  "the CSV reader is quoting-aware",
 );
 
 console.log(

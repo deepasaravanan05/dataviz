@@ -11,9 +11,23 @@
 
 import { EMPLOYEE_DATASET } from "./dataset";
 
-/** The single main entrance. Every employee enters the park through this gate. */
+/**
+ * The single main entrance. Every employee enters the park through this gate.
+ *
+ * IT STEPPED BACK WITH THE PARK, from z = 620 to z = 760. Every ride is now
+ * built to one common height; the layout solver spread the five to fit them,
+ * the deepest of them now stands at z = 484 rather than z = 290, and the
+ * railway that goes round the outside of all of them was refitted to match.
+ * At 620 the gate was no longer outside that railway — it was inside the loop,
+ * with the rails running between the entrance and the park.
+ *
+ * A gate inside the railway is not an entrance, so the entrance moved out.
+ * Everything that reads the gate — the approach road, the spawn line, the
+ * walking lanes, the entrance camera, the bearings the attractions are placed
+ * on — is derived from these two numbers and follows them out.
+ */
 export const GATE_X = 70;
-export const GATE_Z = 620;
+export const GATE_Z = 760;
 
 /**
  * THE MAIN GATE — the Peacock Gate.
@@ -44,8 +58,8 @@ export const GATE_ARCH_Y = 26;
 export const GATE_HEIGHT = 47;
 
 /** Where employees appear from the outside world, and their first step inside. */
-export const SPAWN_Z = 790;
-export const GATE_INNER_Z = 570;
+export const SPAWN_Z = 930;
+export const GATE_INNER_Z = 710;
 
 /** One walking lane per turnstile, so arrivals fan out instead of queueing on one line. */
 export const LANE_COUNT = 9;

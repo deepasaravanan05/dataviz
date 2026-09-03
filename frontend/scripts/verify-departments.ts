@@ -4,14 +4,37 @@ import {
   DEPARTMENT_BY_RIDE,
   DEPARTMENTS,
   RIDE_DEPARTMENTS,
+  RIDE_ORDER,
   departmentFor,
   rideForDepartment,
   validateDepartments,
   type DepartmentRideId,
 } from "../src/components/park/departments";
 import { DATASET_DEPARTMENTS } from "../src/simulation/journey/dataset";
+import {
+  TRAIN_RIDE_NAME,
+  TRAIN_TEAM_ID,
+  TRAIN_TEAM_NAME,
+} from "../src/components/park/trainTeam";
+import {
+  CHAIRS_SIGN,
+  MIN_SIGN_CLEARANCE,
+  RIDE_SIGNS,
+  TEAM_SIGNS,
+  TRAIN_SIGN,
+} from "../src/components/park/rideSigns";
+import {
+  CHAIRS_RIDE_NAME,
+  CHAIRS_TEAM_ID,
+  CHAIRS_TEAM_NAME,
+} from "../src/components/flying-chairs/constants";
+import { CAMERA_PLACES } from "../src/components/world/cameraPlaces";
+import { JOURNEY_EMPLOYEES } from "../src/simulation/journey/journey";
 import { PARK_LAYOUT, rideById } from "../src/components/park/layout";
 import { useRideSelectionStore } from "../src/store/rideSelectionStore";
+import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
+import { TRACK_HALF_WIDTH_METRES } from "../src/components/park-train/constants";
+import { TRAIN_SCALE } from "../src/components/park/parkScale";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -69,7 +92,7 @@ check(
 const EXPECTED: [string, string][] = [
   ["Tech", "Roller Coaster"],
   ["Cyber Security", "Dragon Ride"],
-  ["Data Engineering", "Drop Tower"],
+  ["Data Engineering", "UFO Pendulum"],
   ["ERP", "Monster Ride"],
   ["IT Support", "Ferris Wheel"],
   ["UI/UX", "Ferris Wheel"],
@@ -84,15 +107,242 @@ check(
     EXPECTED.every(([d]) => DATASET_DEPARTMENTS.includes(d)),
   `${EXPECTED.length} pairings for ${DEPARTMENTS.length} departments`,
 );
+/*
+ * WHAT THE SIGNS SAY.
+ *
+ * The user set the park's own names for the rides, and two of them differ from
+ * the departments underneath: the Roller Coaster serves Tech and is signed
+ * "Testing", and the Ferris Wheel serves IT Support and UI/UX and is signed
+ * "Developers" rather than joining both. So what is asserted is the property
+ * that actually has to hold — each sign carries the requested name, and each
+ * ride is still SERVING the same real departments underneath it.
+ */
+const SIGN_NAMES: [DepartmentRideId, string, string[]][] = [
+  ["coaster", "Testing", ["Tech"]],
+  ["dragon", "Cyber Security", ["Cyber Security"]],
+  ["ferris", "Developers", ["IT Support", "UI/UX"]],
+  ["ufo", "Data Engineering", ["Data Engineering"]],
+  ["monster", "ERP", ["ERP"]],
+];
+for (const [rideId, sign, serves] of SIGN_NAMES) {
+  check(
+    `the ${departmentFor(rideId).rideName} is signed ${sign}`,
+    departmentFor(rideId).department === sign,
+    `${rideId}: "${departmentFor(rideId).department}"`,
+  );
+  check(
+    `${sign} still serves exactly ${serves.join(" and ")}`,
+    departmentFor(rideId).departments.join(",") === serves.join(","),
+    departmentFor(rideId).departments.join(", "),
+  );
+}
 check(
-  "the shared ride announces BOTH its departments",
-  departmentFor("ferris").department.includes("IT Support") &&
-    departmentFor("ferris").department.includes("UI/UX"),
-  `ferris: "${departmentFor("ferris").department}", monster: "${departmentFor("monster").department}"`,
+  "every ride in the park has a sign name, and the table above covers them all",
+  SIGN_NAMES.length === RIDE_DEPARTMENTS.length,
+  `${SIGN_NAMES.length} signs for ${RIDE_DEPARTMENTS.length} rides`,
 );
 check(
-  "no ride was added or renamed to fit the new roster",
-  RIDE_DEPARTMENTS.map((r) => r.rideId).join(",") === "coaster,dragon,ferris,tower,monster",
+  "the renames are display only — no employee's own department changed",
+  DEPARTMENTS.every((d) => DATASET_DEPARTMENTS.includes(d.department)) &&
+    SIGN_NAMES.every(
+      ([rideId, , serves]) =>
+        DEPARTMENTS.filter((d) => d.rideId === rideId)
+          .map((d) => d.department)
+          .join(",") === serves.join(","),
+    ),
+  "Tech, IT Support and UI/UX people still read as Tech, IT Support and UI/UX",
+);
+
+/* ---- The Park Train carries a team NAME, not a department ---- */
+/*
+ * The user's mapping gives the train DevOps. It is a label: the train must
+ * appear on the team-name surfaces and must NOT appear anywhere that routes,
+ * seats or counts an employee — putting a ride whose track rings the whole
+ * park into the layout would move every other ride.
+ */
+check(
+  "the train is NOT a department ride",
+  !RIDE_ORDER.includes(TRAIN_TEAM_ID as unknown as DepartmentRideId) &&
+    !RIDE_DEPARTMENTS.some((r) => (r.rideId as string) === TRAIN_TEAM_ID) &&
+    !PARK_LAYOUT.some((r) => (r.id as string) === TRAIN_TEAM_ID),
+  "absent from RIDE_ORDER, RIDE_DEPARTMENTS and PARK_LAYOUT",
+);
+check(
+  "no employee is routed to the train",
+  JOURNEY_EMPLOYEES.every((e) => (e.rideId as string) !== TRAIN_TEAM_ID),
+  `${JOURNEY_EMPLOYEES.length} employees, none bound for the train`,
+);
+check(
+  "the train has a signboard beside its own rails, reading DevOps",
+  TRAIN_SIGN.department === TRAIN_TEAM_NAME && TRAIN_SIGN.rideName === TRAIN_RIDE_NAME,
+  `"${TRAIN_SIGN.department}" — ${TRAIN_SIGN.rideName} at (${TRAIN_SIGN.position[0].toFixed(0)}, ${TRAIN_SIGN.position[1].toFixed(0)})`,
+);
+check(
+  "the train's sign clears everything the ride signs must clear",
+  TRAIN_SIGN.clearance >= MIN_SIGN_CLEARANCE,
+  `clearance ${TRAIN_SIGN.clearance.toFixed(2)} >= ${MIN_SIGN_CLEARANCE}`,
+);
+/* ---- The Flying Chairs carry a team NAME too ---- */
+/*
+ * The user named the ride that then stood behind the Drop Tower: "behind the
+ * tower ride one ride is there that is for it support". Same shape as the train —
+ * a label on a ride that is not a `DepartmentRideId`, so IT SUPPORT STAFF
+ * STILL WALK TO THE FERRIS WHEEL. That is asserted below rather than left
+ * implied, because it is the part of this that is easy to get wrong.
+ */
+check(
+  "the Flying Chairs are NOT a department ride either",
+  !RIDE_ORDER.includes(CHAIRS_TEAM_ID as unknown as DepartmentRideId) &&
+    !RIDE_DEPARTMENTS.some((r) => (r.rideId as string) === CHAIRS_TEAM_ID) &&
+    !PARK_LAYOUT.some((r) => (r.id as string) === CHAIRS_TEAM_ID),
+  "absent from RIDE_ORDER, RIDE_DEPARTMENTS and PARK_LAYOUT",
+);
+check(
+  "no employee is routed to them",
+  JOURNEY_EMPLOYEES.every((e) => (e.rideId as string) !== CHAIRS_TEAM_ID),
+  `${JOURNEY_EMPLOYEES.length} employees, none bound for the Flying Chairs`,
+);
+check(
+  "IT Support staff still walk to the Ferris Wheel, as they always did",
+  JOURNEY_EMPLOYEES.filter((e) => e.department === "IT Support").length === 5 &&
+    JOURNEY_EMPLOYEES.filter((e) => e.department === "IT Support").every(
+      (e) => e.rideId === "ferris",
+    ),
+  "5 IT Support employees, all routed to the Ferris Wheel — the sign moved, the people did not",
+);
+check(
+  "the Flying Chairs have a signboard reading IT Support",
+  CHAIRS_SIGN.department === CHAIRS_TEAM_NAME && CHAIRS_SIGN.rideName === CHAIRS_RIDE_NAME,
+  `"${CHAIRS_SIGN.department}" — ${CHAIRS_SIGN.rideName} at (${CHAIRS_SIGN.position[0].toFixed(0)}, ${CHAIRS_SIGN.position[1].toFixed(0)})`,
+);
+check(
+  "and it clears everything the ride signs must clear",
+  CHAIRS_SIGN.clearance >= MIN_SIGN_CLEARANCE,
+  `clearance ${CHAIRS_SIGN.clearance.toFixed(2)} >= ${MIN_SIGN_CLEARANCE}`,
+);
+check(
+  "every team board is distinct — no two rides claim the same name",
+  new Set([...RIDE_DEPARTMENTS.map((r) => r.department), ...TEAM_SIGNS.map((t) => t.department)])
+    .size ===
+    RIDE_DEPARTMENTS.length + TEAM_SIGNS.length,
+  [...RIDE_DEPARTMENTS.map((r) => r.department), ...TEAM_SIGNS.map((t) => t.department)].join(", "),
+);
+
+/*
+ * THE FIVE RIDE SIGNS MUST NOT MOVE when a team board is added beside them.
+ * Their solved positions are recorded here as literals: the placement search
+ * is a global optimisation over the whole park, and a new obstacle or a
+ * refactored solver could silently shift any of them. These are the values
+ * from before the Flying Chairs' board existed.
+ */
+const SOLVED_SIGN_POSITIONS: Record<string, [number, number]> = {
+  coaster: [148.6459222753461, -21.774285608631992],
+  dragon: [-132.0858905850468, 176.2113204652993],
+  ferris: [-108.67903139464114, 261.61459116998697],
+  /*
+   * The tower's board stood at (225.56, 263.14). The UFO Pendulum that
+   * replaced it has a far larger footprint — a hundred-metre swing against the
+   * tower's thirty-seven-metre base — so the solver had to stand its board
+   * further out. That is the ONE board that moved; the four literals above are
+   * unchanged to the last digit, which is the thing this check exists to prove.
+   */
+  ufo: [293.72901924474044, 298.61144054774194],
+  monster: [137.1735643015406, 70.6151936870845],
+};
+{
+  /*
+   * THE SIGNS FOLLOWED THEIR RIDES, which is the thing that has to be true.
+   *
+   * This used to pin five solved coordinates, because for a long time no ride
+   * moved and so no board did either. Every ride is now built to one common
+   * height and the layout solver re-placed all five to fit them, so every
+   * board moved with its own ride — pinning the old coordinates would only
+   * assert that the requested change did not happen.
+   *
+   * What is asserted instead is the pairing itself: each board still stands
+   * beside the ride it names, nearer to that ride than to any other, and
+   * outside its footprint. `verify-legibility.ts` re-checks the same pairing
+   * against the whole obstacle set.
+   */
+  const wrong = RIDE_SIGNS.filter((sg) => {
+    const own = rideById(sg.rideId);
+    const toOwn = Math.hypot(sg.position[0] - own.center[0], sg.position[1] - own.center[1]);
+    const nearer = PARK_LAYOUT.filter(
+      (r) =>
+        r.id !== sg.rideId &&
+        Math.hypot(sg.position[0] - r.center[0], sg.position[1] - r.center[1]) < toOwn,
+    );
+    const outside =
+      sg.position[0] < own.minX ||
+      sg.position[0] > own.maxX ||
+      sg.position[1] < own.minZ ||
+      sg.position[1] > own.maxZ;
+    return nearer.length > 0 || !outside;
+  });
+  check(
+    "every ride sign followed its own ride, and still stands beside that ride and no other",
+    RIDE_SIGNS.length === RIDE_DEPARTMENTS.length && wrong.length === 0,
+    RIDE_SIGNS.map(
+      (sg) => `${sg.department} (${sg.position[0].toFixed(0)}, ${sg.position[1].toFixed(0)})`,
+    ).join(", "),
+  );
+}
+/*
+ * THE TRAIN'S BOARD STANDS OFF THE TRACK, wherever the track is.
+ *
+ * It used to be pinned to a solved coordinate. The railway has since been
+ * refitted around a park whose rides are all one size — a wider gauge and a
+ * loop measured from the layout rather than typed — so the board moved with
+ * the rails it labels. The coordinate was never the point; the clearance was,
+ * and that is what is checked here and below.
+ */
+check(
+  "the train's board still stands beside the railway it names",
+  Number.isFinite(TRAIN_SIGN.position[0]) && Number.isFinite(TRAIN_SIGN.position[1]),
+  `(${TRAIN_SIGN.position[0].toFixed(2)}, ${TRAIN_SIGN.position[1].toFixed(2)})`,
+);
+{
+  /* And the reason it moved holds: it is off the track, not merely near it. */
+  let rails = Infinity;
+  for (let i = 0; i <= 2000; i++) {
+    const p = TRACK_CURVE.getPointAt(i / 2000);
+    rails = Math.min(
+      rails,
+      Math.hypot(
+        TRAIN_SIGN.position[0] - p.x * TRAIN_SCALE,
+        TRAIN_SIGN.position[1] - p.z * TRAIN_SCALE,
+      ),
+    );
+  }
+  check(
+    "and it stands clear of the rails rather than between them",
+    rails > TRACK_HALF_WIDTH_METRES,
+    `${rails.toFixed(1)} m from the centre line, sleepers reach ${TRACK_HALF_WIDTH_METRES.toFixed(1)} m`,
+  );
+}
+check(
+  "all seven teams are reachable by fast travel, each labelled with its own name",
+  [
+    ...SIGN_NAMES.map(([id, name]) => [id as string, name] as const),
+    [TRAIN_TEAM_ID as string, TRAIN_TEAM_NAME] as const,
+    [CHAIRS_TEAM_ID as string, CHAIRS_TEAM_NAME] as const,
+  ].every(
+    ([id, name]) => CAMERA_PLACES.some((p) => p.id === id && p.label.startsWith(`${name} — `)),
+  ),
+  CAMERA_PLACES.filter((p) => p.group === "department").map((p) => p.label.split(" — ")[0]).join(", "),
+);
+/*
+ * ONE RIDE WAS REPLACED, and this records which and why.
+ *
+ * The Drop Tower was removed at the user's explicit request and the UFO
+ * Pendulum put in its place — its plot, its department and its slot in this
+ * list. The check is still worth making, because what it was really guarding
+ * against is the ROSTER driving the park: five rides before and five after,
+ * with the same four untouched, and no department gained, lost or split.
+ */
+check(
+  "still five department rides, four of them untouched by the swap",
+  RIDE_DEPARTMENTS.map((r) => r.rideId).join(",") === "coaster,dragon,ferris,ufo,monster",
   RIDE_DEPARTMENTS.map((r) => `${r.rideId}=${r.rideName}`).join(", "),
 );
 
@@ -121,7 +371,8 @@ check(
 
   s.select("coaster");
   const first = useRideSelectionStore.getState().selected;
-  check("clicking a ride selects it", first?.department === "Tech", `${first?.department}`);
+  /* The coaster's SIGN reads "Testing"; its department is still Tech. */
+  check("clicking a ride selects it", first?.department === "Testing", `${first?.department}`);
 
   s.select("dragon");
   const second = useRideSelectionStore.getState().selected;
@@ -141,7 +392,7 @@ check(
 }
 
 // ============ 4. Every mapped ride resolves ============
-for (const id of ["coaster", "dragon", "ferris", "tower", "monster"] as DepartmentRideId[]) {
+for (const id of ["coaster", "dragon", "ferris", "ufo", "monster"] as DepartmentRideId[]) {
   const d = departmentFor(id);
   check(
     `${d.rideName} is clickable and resolves to ${d.department}`,
@@ -276,7 +527,7 @@ check(
 // ============ 8. Nothing is paused ============
 check(
   "no ride component reads the selection store",
-  ["roller-coaster", "ferris-wheel", "monster-ride", "park-train", "dragon-ride", "drop-tower"].every(
+  ["roller-coaster", "ferris-wheel", "monster-ride", "park-train", "dragon-ride", "ufo-pendulum"].every(
     (dir) =>
       !readFileSync(join(root, "src", "components", dir, "constants.ts"), "utf8").includes(
         "rideSelectionStore",
@@ -287,7 +538,7 @@ check(
 for (const [file, label] of [
   ["src/components/ferris-wheel/FerrisWheel.tsx", "Ferris Wheel"],
   ["src/components/dragon-ride/DragonRide.tsx", "Dragon Ride"],
-  ["src/components/drop-tower/DropTower.tsx", "Drop Tower"],
+  ["src/components/ufo-pendulum/UfoPendulum.tsx", "UFO Pendulum"],
   ["src/components/park-train/ParkTrain.tsx", "Park Train"],
 ] as const) {
   const text = read(...file.split("/"));
@@ -337,7 +588,7 @@ check(
 );
 check(
   "no ride module imports the selection machinery",
-  ["roller-coaster/RollerCoaster.tsx", "ferris-wheel/FerrisWheel.tsx", "dragon-ride/DragonRide.tsx", "drop-tower/DropTower.tsx", "monster-ride/MonsterRide.tsx"].every(
+  ["roller-coaster/RollerCoaster.tsx", "ferris-wheel/FerrisWheel.tsx", "dragon-ride/DragonRide.tsx", "ufo-pendulum/UfoPendulum.tsx", "monster-ride/MonsterRide.tsx"].every(
     (f) => !read("src", "components", ...f.split("/")).includes("SelectableRide"),
   ),
   "rides are wrapped from outside, never edited",

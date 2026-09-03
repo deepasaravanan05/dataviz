@@ -6,6 +6,8 @@ import {
   NECK_LENGTH,
   MUZZLE_LENGTH,
 } from "../src/components/dragon-ride/dragonProfile";
+import { rideById } from "../src/components/park/layout";
+import { TRAIN_SCALE } from "../src/components/park/parkScale";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -368,9 +370,33 @@ for (const [name, box] of Object.entries(BOXES)) {
   check(`clear of the ${name}`, gap > 4, `${gap.toFixed(1)}u between the swing envelope and its footprint`);
 }
 
-const trackPts = Array.from({ length: 3000 }, (_, i) => TRACK_CURVE.getPointAt(i / 3000));
-const trackGap = Math.min(...trackPts.map((p) => Math.hypot(p.x - dx, p.z - dz))) - trueReach;
-check("clear of the park train's loop", trackGap > 4, `${trackGap.toFixed(1)}u from the rails`);
+/*
+ * CLEAR OF THE RAILWAY — measured in the world, where both of them are.
+ *
+ * This used to compare the ride's AUTHORED origin with track points in the
+ * railway's own unscaled units, which agreed by luck while the loop was a
+ * fixed ellipse near the same origin. The park has since been rebuilt: every
+ * ride is one common height, the solver places them, and the loop is fitted to
+ * those placed boxes in world metres. So both sides are read in world metres
+ * from the modules that own them, and the ride's swept envelope is measured
+ * from where it actually stands.
+ */
+const placedDragon = rideById("dragon");
+const worldTrackPts = Array.from({ length: 3000 }, (_, i) => {
+  const p = TRACK_CURVE.getPointAt(i / 3000);
+  return [p.x * TRAIN_SCALE, p.z * TRAIN_SCALE] as const;
+});
+const trackGap =
+  Math.min(
+    ...worldTrackPts.map(([x, z]) =>
+      Math.hypot(x - placedDragon.center[0], z - placedDragon.center[1]),
+    ),
+  ) - Math.max(placedDragon.halfX, placedDragon.halfZ);
+check(
+  "clear of the park train's loop",
+  trackGap > 4,
+  `${trackGap.toFixed(1)} m between the rails and the ride's own footprint`,
+);
 
 check(
   "sits BEFORE the roller coaster on the entrance side",

@@ -1,5 +1,6 @@
 import { TRACK_CURVE } from "@/components/park-train/trainTrack";
 import { TRAIN_SCALE } from "@/components/park/parkScale";
+import { TRACK_HALF_WIDTH_METRES } from "@/components/park-train/constants";
 import {
   FOOD_COURT_CENTER,
   FOOD_COURT_HALF,
@@ -7,7 +8,19 @@ import {
   GATE_Z,
   SPAWN_Z,
 } from "@/simulation/journey/constants";
+import { PARK_LAYOUT } from "@/components/park/layout";
 import { RIDE_SIGNS } from "@/components/park/rideSigns";
+import { OVERALL_REACH, RIDE_CENTER } from "@/components/flying-chairs/constants";
+import { OVERALL_REACH as LOOPER_REACH } from "@/components/super-looper/constants";
+import { RIDE_CENTER as LOOPER_CENTER } from "@/components/super-looper/placement";
+import { OVERALL_REACH as TEACUPS_REACH } from "@/components/tea-cups/constants";
+import { RIDE_CENTER as TEACUPS_CENTER } from "@/components/tea-cups/placement";
+import { OVERALL_REACH as GIGA_REACH } from "@/components/giga-coaster/envelope";
+import { RIDE_CENTER as GIGA_CENTER } from "@/components/giga-coaster/placement";
+import { OVERALL_REACH as DUMBO_REACH } from "@/components/dumbo-ride/constants";
+import { RIDE_CENTER as DUMBO_CENTER } from "@/components/dumbo-ride/placement";
+import { OVERALL_REACH as UFO_REACH } from "@/components/ufo-pendulum/constants";
+import { RIDE_CENTER as UFO_CENTER } from "@/components/ufo-pendulum/placement";
 import { distanceToPaving, distanceToRide } from "./paths";
 
 /**
@@ -55,10 +68,68 @@ function mulberry32(seed: number) {
   };
 }
 
-/** The landscaped envelope: the park proper plus its approach. */
-const FIELD_CENTER: [number, number] = [150, 250];
-const FIELD_RX = 640;
-const FIELD_RZ = 720;
+/** Clear grass either side of the sleeper ends, before anything is planted. */
+const TRACK_VERGE = 3;
+
+/**
+ * The landscaped envelope: the park proper plus its approach.
+ *
+ * IT FOLLOWS THE PARK NOW. It used to be a fixed ellipse — centre (150, 250),
+ * radii 640 by 720 — which fitted the park it was written for. Every ride is
+ * now built to one common height, the solver spread the five to fit them, and
+ * the attractions moved out behind them: the park outgrew its own landscaping,
+ * and a third of it was left as bare grass with the planting still huddled
+ * where the old middle used to be.
+ *
+ * So the field is measured from what is actually standing — every ride
+ * footprint, every attraction's swept circle, and the gate and its approach,
+ * with a margin of open ground beyond them — and the tree and shrub counts are
+ * a DENSITY rather than a total, so the park keeps the airy, non-woodland
+ * planting that 600 trees over the old field gave it however far it spreads.
+ */
+const FIELD_MARGIN = 160;
+const FIELD_BOUNDS = (() => {
+  let minX = Math.min(GATE_X - 200, SPAWN_Z * 0);
+  let maxX = GATE_X + 200;
+  let minZ = -200;
+  let maxZ = SPAWN_Z + 120;
+  const take = (x: number, z: number, reach: number) => {
+    minX = Math.min(minX, x - reach);
+    maxX = Math.max(maxX, x + reach);
+    minZ = Math.min(minZ, z - reach);
+    maxZ = Math.max(maxZ, z + reach);
+  };
+  for (const r of PARK_LAYOUT) take(r.center[0], r.center[1], Math.max(r.halfX, r.halfZ));
+  take(RIDE_CENTER[0], RIDE_CENTER[1], OVERALL_REACH);
+  take(LOOPER_CENTER[0], LOOPER_CENTER[1], LOOPER_REACH);
+  take(TEACUPS_CENTER[0], TEACUPS_CENTER[1], TEACUPS_REACH);
+  take(GIGA_CENTER[0], GIGA_CENTER[1], GIGA_REACH);
+  take(DUMBO_CENTER[0], DUMBO_CENTER[1], DUMBO_REACH);
+  return { minX, maxX, minZ, maxZ };
+})();
+
+const FIELD_CENTER: [number, number] = [
+  (FIELD_BOUNDS.minX + FIELD_BOUNDS.maxX) / 2,
+  (FIELD_BOUNDS.minZ + FIELD_BOUNDS.maxZ) / 2,
+];
+const FIELD_RX = (FIELD_BOUNDS.maxX - FIELD_BOUNDS.minX) / 2 + FIELD_MARGIN;
+const FIELD_RZ = (FIELD_BOUNDS.maxZ - FIELD_BOUNDS.minZ) / 2 + FIELD_MARGIN;
+
+/**
+ * Trees and shrubs per square metre.
+ *
+ * The base figures are the ones this park was tuned on — 600 trees and 2200
+ * shrubs over the old 640 x 720 field, which is the airy, non-woodland look
+ * that replaced an earlier 1500-tree thicket. They are then multiplied by
+ * SPREAD_MAKEUP, because the enlarged park is not simply a bigger version of
+ * the old one: the rides are further apart, so more of the ground between them
+ * is open, and holding the old density left a third of the park reading as
+ * bare grass. Even multiplied, this is well under the density the woodland
+ * version had — the trees are spread over a far larger field.
+ */
+const SPREAD_MAKEUP = 2;
+const TREE_DENSITY = (600 * SPREAD_MAKEUP) / (Math.PI * 640 * 720);
+const SHRUB_DENSITY = (2200 * SPREAD_MAKEUP) / (Math.PI * 640 * 720);
 
 const trackPoints: [number, number][] = (() => {
   const pts: [number, number][] = [];
@@ -89,7 +160,54 @@ function inField(x: number, z: number): boolean {
 function obstruction(x: number, z: number): number {
   let m = distanceToPaving(x, z) - 1.5;
   m = Math.min(m, distanceToRide(x, z) - 6);
-  m = Math.min(m, trackDistance(x, z) - 7);
+  /*
+   * Off the railway, not merely off its centre line. This used to be a flat
+   * 7 m, which was already less than the old track's half-width and became
+   * far less when the gauge was widened by ten metres — the difference is a
+   * shrub growing between the rails. `TRACK_HALF_WIDTH_METRES` follows the
+   * gauge, so the verge stays a verge whatever the track does.
+   */
+  m = Math.min(m, trackDistance(x, z) - (TRACK_HALF_WIDTH_METRES + TRACK_VERGE));
+  /*
+   * The Flying Chairs were added to the park after this planting was laid out,
+   * so they get the same keep-out every other attraction already had —
+   * otherwise a stand of trees grows inside the ride. Existing trees do not
+   * move: each candidate draws its position before this test, so rejecting the
+   * ones under the ride leaves every other tree at exactly the coordinates it
+   * had. The count is held at TREE_TARGET, so the few cleared here are made up
+   * in open ground and the park stays as green.
+   */
+  m = Math.min(
+    m,
+    Math.hypot(x - RIDE_CENTER[0], z - RIDE_CENTER[1]) - (OVERALL_REACH + 8),
+  );
+
+  /*
+   * And the UFO Pendulum, added later still, on the same terms. Its reach is
+   * the swing at full amplitude rather than a standing footprint, so the
+   * keep-out is what the saucer actually passes over — a tree under the arc is
+   * a tree the ride goes through.
+   */
+  m = Math.min(m, Math.hypot(x - UFO_CENTER[0], z - UFO_CENTER[1]) - (UFO_REACH + 8));
+
+  /*
+   * And the Super Looper, added last of all, on exactly the same terms. Its
+   * reach is the outside of the ring, so the keep-out is the ground the loop
+   * and its frames actually stand on.
+   */
+  m = Math.min(
+    m,
+    Math.hypot(x - LOOPER_CENTER[0], z - LOOPER_CENTER[1]) - (LOOPER_REACH + 8),
+  );
+
+  /* And the Tea Cups, behind the pendulum, on the same terms again. */
+  m = Math.min(m, Math.hypot(x - TEACUPS_CENTER[0], z - TEACUPS_CENTER[1]) - (TEACUPS_REACH + 8));
+
+  /* And the Giga Coaster's circuit, which claims more ground than any of them. */
+  m = Math.min(m, Math.hypot(x - GIGA_CENTER[0], z - GIGA_CENTER[1]) - (GIGA_REACH + 8));
+
+  /* And the Dumbo Ride, measured on the circle its elephants sweep. */
+  m = Math.min(m, Math.hypot(x - DUMBO_CENTER[0], z - DUMBO_CENTER[1]) - (DUMBO_REACH + 8));
 
   // Food court terrace and building.
   m = Math.min(
@@ -148,8 +266,8 @@ function build(): { trees: Planting[]; shrubs: ShrubPlanting[] } {
    * skyline and leave the park ending at a line, which is a different change
    * from the one asked for.
    */
-  const TREE_TARGET = 600;
-  const SHRUB_TARGET = 2200;
+  const TREE_TARGET = Math.round(TREE_DENSITY * Math.PI * FIELD_RX * FIELD_RZ);
+  const SHRUB_TARGET = Math.round(SHRUB_DENSITY * Math.PI * FIELD_RX * FIELD_RZ);
   const MAX_TRIES = 400000;
 
   for (let i = 0; i < MAX_TRIES && trees.length < TREE_TARGET; i++) {

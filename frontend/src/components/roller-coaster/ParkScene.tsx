@@ -10,8 +10,13 @@ import { RollerCoaster } from "./RollerCoaster";
 import { MonsterRide } from "@/components/monster-ride/MonsterRide";
 import { Track as TrainTrack } from "@/components/park-train/Track";
 import { ParkTrain } from "@/components/park-train/ParkTrain";
+import { FlyingChairs } from "@/components/flying-chairs/FlyingChairs";
+import { SuperLooper } from "@/components/super-looper/SuperLooper";
+import { TeaCups } from "@/components/tea-cups/TeaCups";
+import { GigaCoaster } from "@/components/giga-coaster/GigaCoaster";
+import { DumboRide } from "@/components/dumbo-ride/DumboRide";
+import { UfoPendulum } from "@/components/ufo-pendulum/UfoPendulum";
 import { DragonRide } from "@/components/dragon-ride/DragonRide";
-import { DropTower } from "@/components/drop-tower/DropTower";
 import { TRAIN_SCALE } from "@/components/park/parkScale";
 import { SKY_THEMES } from "@/components/world/skyThemes";
 import { useSkyThemeStore } from "@/store/skyThemeStore";
@@ -49,8 +54,6 @@ export interface ParkSceneProps {
   showTrainLabels?: boolean;
   /** Show the per-employee time labels on the Dragon Swing Ship. */
   showDragonLabels?: boolean;
-  /** Show the per-employee time labels on the Drop Tower. */
-  showTowerLabels?: boolean;
   /**
    * Vertical field of view. Defaults to the park's standard wide framing; the
    * entrance passes a longer lens so the rides read at the size they do in the
@@ -68,7 +71,6 @@ export function ParkScene({
   showRiderLabels = false,
   showTrainLabels = false,
   showDragonLabels = false,
-  showTowerLabels = false,
   cameraFov = DEFAULT_FOV,
 }: ParkSceneProps = {}) {
   const skyTheme = useSkyThemeStore((s) => s.theme);
@@ -108,9 +110,15 @@ export function ParkScene({
         /*
          * Night haze. It begins beyond the park itself so no ride is ever
          * washed out — at the furthest the camera can orbit, the park sits
-         * under about 17% haze, enough to give the distance real depth — and
+         * under about 21% haze, enough to give the distance real depth — and
          * it closes well short of the ground's edge, so the land fades into
          * the night instead of ending at a line.
+         *
+         * The distances moved out with the park. Every ride is built to one
+         * height now and the fan that separates them is far wider for it: the
+         * property is 1450u across where it was a few hundred, so a haze that
+         * began at 900u began inside the park itself, and an orbit limit that
+         * framed the old park could no longer fit this one in the lens.
          */
         args={[sky.fog.color, sky.fog.near, sky.fog.far]}
       />
@@ -180,7 +188,7 @@ export function ParkScene({
         // Half-extent 7000u. The camera can orbit out to 1800u and fog closes
         // at 3800u, so the nearest edge is always at least 5200u away —
         // permanently inside full fog, and therefore never visible.
-        size={14000}
+        size={20000}
         plazaRadius={PLAZA_RADIUS}
         plazaCenter={PLAZA_CENTER}
         // Warm evening landscape, matching the project's sunset reference:
@@ -236,10 +244,61 @@ export function ParkScene({
       </SelectableRide>
 
       {/* The Drop Tower keeps its exact size — it is the park's scale reference. */}
-      <SelectableRide id="tower">
-        <DropTower showLabels={showTowerLabels} />
-        {/* The tower rig positions itself from TOWER_ORIGIN, like the ride does. */}
-        <RideLights id="tower" />
+
+
+      {/*
+        The Flying Chairs, standing behind the food court.
+        World space and no offset of its own: it positions itself from
+        RIDE_CENTER, solved from where the gate and the food court already are.
+        Nothing above this line changes because of it.
+      */}
+      <FlyingChairs />
+
+      {/*
+        The Super Looper, beside the Roller Coaster.
+        World space and no offset of its own: it searches placement.ts for the
+        nearest ground to the coaster that was already clear and stands there.
+        It is not in the park layout and it is not a department ride, so
+        nothing above this line changes because of it.
+      */}
+      <SuperLooper />
+
+      {/*
+        The Tea Cups, behind the UFO Pendulum — the Data Engineering ride.
+        World space and no offset of its own: placement.ts solves how far out
+        along the gate's line of sight through the pendulum it has to stand.
+        Not in the park layout and not a department ride, so nothing above this
+        line changes because of it.
+      */}
+      <TeaCups />
+
+      {/*
+        The Giga Coaster, on the nearest clear ground to the Tea Cups.
+        World space and no offset of its own. Not in the park layout and not a
+        department ride, so nothing above this line changes because of it.
+      */}
+      <GigaCoaster />
+
+      {/*
+        The Dumbo Ride, behind the UFO Pendulum — the Data Engineering ride —
+        and a few degrees off the gate's line of sight through it, because the
+        Tea Cups already hold that line. World space and no offset of its own.
+        Not in the park layout and not a department ride, so nothing above this
+        line changes because of it.
+      */}
+      <DumboRide />
+
+      {/*
+        The UFO Pendulum, on the plot the Drop Tower used to hold.
+        It is a DEPARTMENT ride — Data Engineering walks here — so it is
+        wrapped and lit exactly as the tower was: selectable by id, with the
+        park's own LED rig for that id, and positioning itself in world space
+        from its layout centre rather than from an offset.
+      */}
+      <SelectableRide id="ufo">
+        <UfoPendulum />
+        {/* The rig positions itself from RIDE_ORIGIN, like the ride does. */}
+        <RideLights id="ufo" />
       </SelectableRide>
 
       {/*
@@ -274,7 +333,7 @@ export function ParkScene({
         minDistance={30}
         // Far enough to frame the whole property from the main gate,
         // close enough that the park never washes out into the fog.
-        maxDistance={1600}
+        maxDistance={1800}
         maxPolarAngle={Math.PI / 2.05}
       />
 

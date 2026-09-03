@@ -2,15 +2,14 @@
 
 import { useRef } from "react";
 import { useEmployeeDataStore } from "@/store/employeeDataStore";
-import { UPLOAD_ACCEPT, isSupportedFile } from "@/simulation/journey/employeeUpload";
+import { UPLOAD_ACCEPT } from "@/simulation/journey/employeeUpload";
 
 /**
  * The entrance's single upload control.
  *
- * ONE control for all three formats, not one per format: the file picker's
- * own `accept` list is what offers Excel and CSV together, so the user makes
- * that choice in the place they are already choosing a file rather than
- * having to decide which of two buttons to press before they get there.
+ * ONE control that takes ANY file: the picker is not filtered by extension,
+ * and the reader works out the format from the bytes, so nothing a user has to
+ * hand is greyed out or handed back before it has been opened.
  *
  * It sits in the top-right corner the two navigation links used to occupy —
  * clear of the left-hand calendar and Department Check-In Overview column, of
@@ -58,7 +57,7 @@ export function EmployeeDataUpload() {
   const fileName = useEmployeeDataStore((s) => s.fileName);
   const error = useEmployeeDataStore((s) => s.error);
   const rowCount = useEmployeeDataStore((s) => s.rows?.length ?? 0);
-  const unmapped = useEmployeeDataStore((s) => s.unmappedDepartments);
+  const notes = useEmployeeDataStore((s) => s.notes);
   const upload = useEmployeeDataStore((s) => s.upload);
 
   const loading = status === "loading";
@@ -73,18 +72,13 @@ export function EmployeeDataUpload() {
     event.target.value = "";
     if (!file) return;
 
-    /* Reject the obvious case before touching the parser, so a wrong file
-       comes back instantly rather than after a load. */
-    if (!isSupportedFile(file.name)) {
-      useEmployeeDataStore.setState({
-        status: "error",
-        fileName: null,
-        rows: null,
-        unmappedDepartments: [],
-        error: `"${file.name}" is not supported. Choose an .xlsx, .xls or .csv file.`,
-      });
-      return;
-    }
+    /*
+     * STRAIGHT TO THE PARSER, whatever the file is called. There used to be an
+     * extension check here that handed a file back before it had been opened,
+     * which meant a roster saved as .txt, .tsv, .ods or with no extension at
+     * all was refused on the strength of its NAME. The parser reads the bytes
+     * and works out what it is holding.
+     */
     void upload(file);
   }
 
@@ -133,9 +127,15 @@ export function EmployeeDataUpload() {
         </p>
       )}
 
-      {status === "ready" && unmapped.length > 0 && (
-        <p className="max-w-full rounded-2xl border border-amber-300/20 bg-[#070b14]/82 px-3 py-1 text-right text-[11px] leading-snug text-amber-200/85 shadow-lg shadow-black/30 backdrop-blur-xl">
-          No ride serves: {unmapped.join(", ")}
+      {/*
+        * What the upload absorbed rather than refused. Deliberately in the
+        * same quiet slate as the rest of the panel and NOT in the error red:
+        * none of these is a thing the user has to go and fix — the file was
+        * accepted, and this is the reading of it.
+        */}
+      {status === "ready" && notes.length > 0 && (
+        <p className="max-w-full rounded-2xl border border-white/10 bg-[#070b14]/82 px-3 py-1 text-right text-[11px] leading-snug text-white/55 shadow-lg shadow-black/30 backdrop-blur-xl">
+          {notes.join(" · ")}
         </p>
       )}
 
@@ -149,7 +149,7 @@ export function EmployeeDataUpload() {
       )}
 
       {status === "idle" && (
-        <p className="pr-3 text-[10px] text-white/35">Excel or CSV · .xlsx .xls .csv</p>
+        <p className="pr-3 text-[10px] text-white/35">Any spreadsheet or table · Excel, CSV, TSV, text</p>
       )}
     </div>
   );

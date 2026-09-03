@@ -11,6 +11,7 @@ import {
   SEATS_PER_ROW,
   SEAT_ROWS_PER_CARRIAGE,
   WHEEL_RADIUS,
+  WHEEL_X,
 } from "./constants";
 import { ridersForCarriage } from "./riders";
 import { SeatedRider } from "./SeatedRider";
@@ -19,11 +20,17 @@ import { SEAT_GREY, SEAT_METALNESS, SEAT_ROUGHNESS } from "@/world/seatColor";
 const halfW = CAR_WIDTH / 2;
 const halfL = CAR_LENGTH / 2;
 
+/*
+ * Across the track from the gauge, along it as the car was always drawn.
+ *
+ * These used to be `halfW + 0.1` — the car's own half-width — which is how the
+ * wheels came to stand outside the rails rather than on them.
+ */
 const WHEEL_POSITIONS: [number, number][] = [
-  [-halfW - 0.1, halfL - 0.75],
-  [halfW + 0.1, halfL - 0.75],
-  [-halfW - 0.1, -(halfL - 0.75)],
-  [halfW + 0.1, -(halfL - 0.75)],
+  [-WHEEL_X, halfL - 0.75],
+  [WHEEL_X, halfL - 0.75],
+  [-WHEEL_X, -(halfL - 0.75)],
+  [WHEEL_X, -(halfL - 0.75)],
 ];
 
 /** Local y=0 is the axle line — matches Locomotive.tsx and the kinematics height. */

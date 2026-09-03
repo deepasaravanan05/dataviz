@@ -2,7 +2,30 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { EMPLOYEE_HEIGHT, HUMAN, LOD_MID, LOD_NEAR, PROP, SIGN } from "../src/world/scale";
 import { PARK_LAYOUT, PLAZA_CENTER, rideById } from "../src/components/park/layout";
+import { UNIFORM_RIDE_HEIGHT } from "../src/components/park/uniformRideHeight";
 import { CAMERA_PLACES, UNREACHABLE_RIDES } from "../src/components/world/cameraPlaces";
+import { TRAIN_TEAM_ID } from "../src/components/park/trainTeam";
+import {
+  CHAIRS_TEAM_ID,
+  OVERALL_REACH as CHAIRS_REACH,
+  RIDE_CENTER as CHAIRS_CENTER,
+} from "../src/components/flying-chairs/constants";
+import {
+  LOOPER_RIDE_ID,
+  OVERALL_REACH as LOOPER_REACH,
+} from "../src/components/super-looper/constants";
+import {
+  TEACUPS_RIDE_ID,
+  OVERALL_REACH as TEACUPS_REACH,
+} from "../src/components/tea-cups/constants";
+import { RIDE_CENTER as TEACUPS_CENTER } from "../src/components/tea-cups/placement";
+import { RIDE_CENTER as LOOPER_CENTER } from "../src/components/super-looper/placement";
+import {
+  DUMBO_RIDE_ID,
+  OVERALL_REACH as DUMBO_REACH,
+} from "../src/components/dumbo-ride/constants";
+import { RIDE_CENTER as DUMBO_CENTER } from "../src/components/dumbo-ride/placement";
+import { TRACK_CENTER } from "../src/components/park-train/constants";
 import { PATH_LINKS, PATH_NODES, distanceToPaving } from "../src/components/world/paths";
 import { BOUNDARY_TREES, PARK_SHRUBS, PARK_TREES } from "../src/components/world/planting";
 import { RIDE_SIGNS } from "../src/components/park/rideSigns";
@@ -23,6 +46,8 @@ import {
 import { SPEED_OPTIONS } from "../src/simulation/journey/clock";
 import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
 import { TRAIN_SCALE } from "../src/components/park/parkScale";
+import { OVERALL_REACH as UFO_REACH } from "../src/components/ufo-pendulum/constants";
+import { RIDE_CENTER as UFO_CENTER } from "../src/components/ufo-pendulum/placement";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -85,7 +110,7 @@ check(
     GATE_HEIGHT / EMPLOYEE_HEIGHT > 3,
   `${GATE_HEIGHT} m tall = ${(GATE_HEIGHT / HUMAN.height).toFixed(0)} real people, and still ` +
     `${(GATE_HEIGHT / EMPLOYEE_HEIGHT).toFixed(1)} of the oversized drawn figures, ` +
-    `against a ${PARK_LAYOUT.find((r) => r.id === "tower")!.height.toFixed(0)} m Drop Tower behind it`,
+    `against a ${PARK_LAYOUT.find((r) => r.id === "ufo")!.height.toFixed(0)} m UFO Pendulum behind it`,
 );
 check(
   "the gate opening is a gate, not a stadium",
@@ -293,6 +318,23 @@ const maxZ = Math.max(...zs);
 
 /** Share of the park within sight of something built or planted. */
 const GRID = 12;
+/** The attractions the layout solver does not place, and how far they reach. */
+/*
+ * Ground that an ATTRACTION stands on is furnished ground — that is what this
+ * list is for. It had fallen behind the park: the Super Looper and the Tea Cups
+ * were both added after it was written, and both keep planting off a wide
+ * circle of ground that then counted as bare. Listing them is the fix; moving
+ * the threshold to accommodate a stale list would not be one. The Dumbo Ride
+ * joins them for the same reason.
+ */
+const ATTRACTIONS: [readonly [number, number], number][] = [
+  [CHAIRS_CENTER, CHAIRS_REACH],
+  [UFO_CENTER, UFO_REACH],
+  [LOOPER_CENTER, LOOPER_REACH],
+  [TEACUPS_CENTER, TEACUPS_REACH],
+  [DUMBO_CENTER, DUMBO_REACH],
+];
+
 let sampled = 0;
 let furnished = 0;
 for (let x = minX; x <= maxX; x += GRID) {
@@ -312,6 +354,22 @@ for (let x = minX; x <= maxX; x += GRID) {
         if (
           Math.hypot(Math.max(r.minX - x, 0, x - r.maxX), Math.max(r.minZ - z, 0, z - r.maxZ)) < 26
         ) {
+          near = true;
+          break;
+        }
+      }
+    }
+    /*
+     * PARK_LAYOUT is the five rides the SOLVER places, and this check has
+     * always used it as its list of attractions. Two more have been added
+     * since — the Flying Chairs and the UFO Pendulum — and neither is in the
+     * solver, on purpose, because a sixth box would re-solve the whole park.
+     * So they have to be named here, or ground standing under a hundred-metre
+     * pendulum counts as bare.
+     */
+    if (!near) {
+      for (const [center, reach] of ATTRACTIONS) {
+        if (Math.hypot(center[0] - x, center[1] - z) < reach + 26) {
           near = true;
           break;
         }
@@ -459,13 +517,39 @@ for (const p of CAMERA_PLACES) {
 }
 check("no viewpoint is inside a ride", insideSomething === "", insideSomething || "all clear");
 check("no viewpoint is underground", underground === "", underground || "all above ground");
+/*
+ * The Park Train rides with the department chips but is not a department ride
+ * — it carries the DevOps team's NAME and has no layout footprint, so its
+ * subject is the rail loop's centre rather than a ride's box. Same property,
+ * read from the module that owns the subject.
+ */
+const TRAIN_LOOP_CENTER: [number, number] = [
+  TRACK_CENTER[0] * TRAIN_SCALE,
+  TRACK_CENTER[1] * TRAIN_SCALE,
+];
 check(
   "each department viewpoint actually frames its own ride",
   CAMERA_PLACES.filter((p) => p.group === "department").every((p) => {
-    const c = rideById(p.id).center;
+    /* The chips that carry a TEAM name rather than a department own their own
+       subject: the Park Train's is the rail loop's centre, and the Flying
+       Chairs', the Super Looper's, the Tea Cups' and the Dumbo Ride's are
+       their own solved positions. None of them has a layout footprint to
+       read — they are not rides the solver places. */
+    const c =
+      p.id === TRAIN_TEAM_ID
+        ? TRAIN_LOOP_CENTER
+        : p.id === CHAIRS_TEAM_ID
+          ? CHAIRS_CENTER
+          : p.id === LOOPER_RIDE_ID
+            ? LOOPER_CENTER
+            : p.id === TEACUPS_RIDE_ID
+              ? TEACUPS_CENTER
+              : p.id === DUMBO_RIDE_ID
+                ? DUMBO_CENTER
+                : rideById(p.id).center;
     return Math.hypot(p.lookAt[0] - c[0], p.lookAt[2] - c[1]) < 1e-6;
   }),
-  "look-at points are the ride centres, read from the layout",
+  "look-at points are the ride centres, read from the layout — and the loop centre for the train",
 );
 check(
   "the camera never moves on its own",
@@ -497,20 +581,29 @@ check(
  *     overlap by 12.5 m in x. The layout solver will not let two rides
  *     intersect, so it pushed the pair apart symmetrically.
  */
-const EXPECTED: Record<string, [number, number]> = {
-  ferris: [-165, 250],
-  dragon: [-72.3, 117.7],
-  coaster: [57.7196817359987, -10],
-  monster: [217.2803182640013, 50],
-  tower: [267.75, 240],
-};
+/*
+ * WHAT THIS CHECK GUARDS NOW.
+ *
+ * It held five frozen coordinates for as long as the standing instruction was
+ * that no ride ever moves. The instruction has been superseded: every ride is
+ * to be the same size, the footprints grew with the heights, and the layout
+ * solver re-placed all five to fit them and to keep their silhouettes apart.
+ * Freezing the old coordinates would only be asserting that the change the
+ * user asked for did not happen.
+ *
+ * So what is asserted is the property those coordinates existed to protect —
+ * every ride is one uniform size, and no two of them overlap on the ground —
+ * and the positions are printed so a change to them shows up in the log.
+ */
 check(
-  "every ride is still exactly where it was, and still its original size",
-  PARK_LAYOUT.every((r) => {
-    const e = EXPECTED[r.id];
-    return e && Math.abs(r.center[0] - e[0]) < 1e-6 && Math.abs(r.center[1] - e[1]) < 1e-6;
-  }),
-  PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)}) ${r.height}m`).join(", "),
+  "every ride is the park's one size, and no two overlap",
+  PARK_LAYOUT.every((r) => Math.abs(r.height - UNIFORM_RIDE_HEIGHT) < 0.01) &&
+    PARK_LAYOUT.every((a) =>
+      PARK_LAYOUT.every(
+        (b) => a === b || a.maxX < b.minX || b.maxX < a.minX || a.maxZ < b.minZ || b.maxZ < a.minZ,
+      ),
+    ),
+  PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)}) ${r.height.toFixed(0)}m`).join(", "),
 );
 check(
   "the plaza is untouched",

@@ -198,11 +198,29 @@ check(
       "Ground level",
       "Main entrance",
       "Food court",
-      "Tech",
+      /* The Giga Coaster carries no team name either. */
+      "Giga Coaster",
+      "Testing",
       "Cyber Security",
-      "IT Support · UI/UX",
+      "Developers",
       "ERP",
       "Data Engineering",
+      /* The Park Train is not a department ride; its chip carries the DevOps
+         team label and sits after the five — see trainTeam.ts. */
+      "DevOps",
+      /* The Flying Chairs are not a department ride either; their chip
+         carries the IT Support team label — see flying-chairs/constants.ts. */
+      "IT Support",
+      /* Nor is the Super Looper, which the user named for UI/UX — a label on a
+         signboard, not a routing destination. UI/UX staff still walk to the
+         Ferris Wheel. See super-looper/constants.ts. */
+      "UI/UX",
+      /* And the Tea Cups, which the user named for Risk — a team that is not in
+         the roster at all, so there is not even anybody to re-route. */
+      "Risk",
+      /* And the Dumbo Ride, which the user named for Finance — another team
+         with nobody in the roster to re-route. */
+      "Finance",
     ];
     check(
       "the navigation reads in the exact requested order",
@@ -210,14 +228,22 @@ check(
       nav.join(" | "),
     );
     check(
-      "Central plaza is gone and Data Engineering is last",
-      !nav.includes("Central plaza") && nav[nav.length - 1] === "Data Engineering",
-      "one chip removed, one moved to the end",
+      "Central plaza is gone, and Data Engineering is last of the department rides",
+      !nav.includes("Central plaza") &&
+        nav[nav.indexOf("DevOps") - 1] === "Data Engineering" &&
+        /* The team chips trail the five, in the order their rides were added:
+           the Park Train, the Flying Chairs, and now the Super Looper, which
+           the user named for UI/UX. None of them is a routing destination. */
+        nav.slice(nav.indexOf("DevOps")).join(",") === "DevOps,IT Support,UI/UX,Risk,Finance",
+      "one chip removed, one moved to the end, and the five team chips after them",
     );
     check(
       "reordering the chips did not reorder the park itself",
-      RIDE_DEPARTMENTS.map((d) => d.rideId).join(",") === "coaster,dragon,ferris,tower,monster",
-      "RIDE_ORDER untouched — paving, panel and dashboard unaffected",
+      RIDE_DEPARTMENTS.map((d) => d.rideId).join(",") === "coaster,dragon,ferris,ufo,monster",
+      "RIDE_ORDER's shape untouched — paving, panel and dashboard unaffected. The fourth " +
+        "slot reads `ufo` rather than `tower` because the Drop Tower was replaced by the " +
+        "UFO Pendulum at the user's request; the ORDER, which is what this check is about, " +
+        "never moved.",
     );
     check(
       "every ride is still reachable after the reorder",
@@ -320,10 +346,32 @@ check(
       /DatasetRow/.test(parser) && /from "\.\/dataset"/.test(parser),
       "parses to DatasetRow[], the shape EMPLOYEE_DATASET already has",
     );
+    /*
+     * The parser used to read `SheetNames[0]` and nothing else, and to reach
+     * for `parseCsv` only when the extension said .csv. Both were changed on
+     * the instruction that an upload must accept whatever file is handed to
+     * it, so what is asserted here is the contract that replaced them: format
+     * is decided by the BYTES, and a workbook is searched right through.
+     */
     check(
-      "Excel reads the first worksheet, CSV is read directly",
-      /SheetNames\[0\]/.test(parser) && /parseCsv\(await file\.text\(\)\)/.test(parser),
-      "first sheet for workbooks, direct read for CSV",
+      "format comes from the bytes, not the extension",
+      /looksLikeWorkbook/.test(parser) &&
+        /0x50/.test(parser) &&
+        /0xd0/.test(parser) &&
+        /new TextDecoder/.test(parser),
+      "zip and OLE signatures sniffed for workbooks, everything else decoded as text",
+    );
+    check(
+      "every worksheet is considered, and the delimiter is detected rather than assumed",
+      /book\.SheetNames\.map/.test(parser) &&
+        !/SheetNames\[0\]/.test(parser) &&
+        /detectDelimiter\(decoded\)/.test(parser),
+      "the sheet with the most rows wins; commas, semicolons, tabs and pipes all read",
+    );
+    check(
+      "no file is turned away at the door",
+      /UPLOAD_ACCEPT = "\*\/\*"/.test(parser) && !/export function isSupportedFile/.test(parser),
+      "the picker accepts anything and there is no extension gate left to fail",
     );
     check(
       "no roster is hard-coded in the upload path",

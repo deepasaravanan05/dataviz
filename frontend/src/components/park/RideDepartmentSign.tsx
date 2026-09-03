@@ -12,8 +12,18 @@ import {
   SIGN_BOARD_HEIGHT,
   SIGN_HALF_WIDTH,
   SIGN_POST_HEIGHT,
+  TEAM_SIGNS,
   type RideSign,
+  type TeamSign,
 } from "./rideSigns";
+import { TRAIN_TEAM_ID } from "./trainTeam";
+import { CHAIRS_TEAM_ID } from "@/components/flying-chairs/constants";
+import { LOOPER_RIDE_ID } from "@/components/super-looper/constants";
+import { LOOPER_SIGN } from "@/components/super-looper/sign";
+import { TEACUPS_RIDE_ID } from "@/components/tea-cups/constants";
+import { TEACUPS_SIGN } from "@/components/tea-cups/sign";
+import { DUMBO_RIDE_ID } from "@/components/dumbo-ride/constants";
+import { DUMBO_SIGN } from "@/components/dumbo-ride/sign";
 
 /**
  * The department signboard that stands beside each ride.
@@ -35,7 +45,7 @@ const ACCENT = "#f2b134";
 const POST = "#8d99a8";
 const BOARD_MID = SIGN_BOARD_BOTTOM + SIGN_BOARD_HEIGHT / 2;
 
-function Sign({ sign }: { sign: RideSign }) {
+function Sign({ sign }: { sign: RideSign | TeamSign }) {
   /*
    * The lettering follows the ACTIVE roster: the built-in mapping's names by
    * default, and after an upload the departments whose staff actually walk to
@@ -46,6 +56,18 @@ function Sign({ sign }: { sign: RideSign }) {
   const source = useActiveJourneyStore((s) => s.source);
   const revision = useActiveJourneyStore((s) => s.revision);
   const departments = useMemo(() => {
+    /* These are team LABELS, not routing destinations — no roster sends
+       anybody to them, so there is no active department to read and their
+       boards always say what their own modules say. */
+    if (
+      sign.rideId === TRAIN_TEAM_ID ||
+      sign.rideId === CHAIRS_TEAM_ID ||
+      sign.rideId === LOOPER_RIDE_ID ||
+      sign.rideId === TEACUPS_RIDE_ID ||
+      sign.rideId === DUMBO_RIDE_ID
+    ) {
+      return sign.departments;
+    }
     if (source === "builtin") return sign.departments;
     const active = activeDepartmentsForRide(sign.rideId);
     return active.length > 0 ? active : sign.departments;
@@ -125,6 +147,17 @@ export function RideDepartmentSigns() {
       {RIDE_SIGNS.map((sign) => (
         <Sign key={sign.rideId} sign={sign} />
       ))}
+      {/* The team boards for the rides that are not department rides — the
+          Park Train and the Flying Chairs. Same vocabulary, each solved
+          against the park it stands in. */}
+      {TEAM_SIGNS.map((sign) => (
+        <Sign key={sign.rideId} sign={sign} />
+      ))}
+      {/* And the Super Looper's, which is solved in its own module for a
+          dependency reason rather than a stylistic one — see sign.ts. */}
+      <Sign sign={LOOPER_SIGN} />
+      <Sign sign={TEACUPS_SIGN} />
+      <Sign sign={DUMBO_SIGN} />
     </group>
   );
 }

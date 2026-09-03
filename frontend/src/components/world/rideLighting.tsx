@@ -28,13 +28,16 @@ import {
   ARM_LENGTH as DRAGON_ARM,
 } from "@/components/dragon-ride/constants";
 import {
-  TOWER_HEIGHT as DROP_TOWER_HEIGHT,
-  TOWER_HALF,
-  TOWER_ORIGIN,
-  BAY_COUNT,
-  FOUNDATION_RADIUS,
-  STATION_OUTER_R,
-} from "@/components/drop-tower/constants";
+  BEARING_Y as UFO_BEARING_Y,
+  PAD_RADIUS as UFO_PAD_RADIUS,
+  TOWER_FOOT_SPREAD as UFO_FOOT_SPREAD,
+  TOWER_HEAD_HEIGHT as UFO_HEAD_HEIGHT,
+  TOWER_SPREAD as UFO_SPREAD,
+} from "@/components/ufo-pendulum/constants";
+import {
+  RIDE_FACING as UFO_FACING,
+  RIDE_ORIGIN as UFO_ORIGIN,
+} from "@/components/ufo-pendulum/placement";
 import { TRACK_CURVE as TRAIN_CURVE } from "@/components/park-train/trainTrack";
 import type { DepartmentRideId } from "@/components/park/departments";
 
@@ -98,8 +101,8 @@ export const RIDE_LOOK: Record<string, { look: LedLook; accent: string; label: s
     accent: "#22e8ff",
     label: "blue / cyan",
   },
-  // DATA ENGINEERING — purple in the mast, the pulse climbing it into violet.
-  tower: {
+  // DATA ENGINEERING — purple through the A-frames, pulsing up into violet.
+  ufo: {
     look: { colorA: "#8b2fe0", colorB: "#c77bff", speed: 0.5, cycles: 1, base: 0.45, gain: 2.2 },
     accent: "#a855f7",
     label: "purple / violet",
@@ -199,7 +202,7 @@ function CoasterRig() {
    * geometry inside <group position={COASTER_ORIGIN}>, while TRACK_CURVE is
    * authored in the ride's own local space (its points centre on x=2.4). Without
    * this offset the LEDs drew a second, empty coaster 50u to the left — 100u in
-   * world space at the current park scale. The DropTower, Dragon and Monster
+   * world space at the current park scale. The pendulum, Dragon and Monster
    * rigs already offset by their rides' origins the same way.
    */
   return (
@@ -216,36 +219,61 @@ function CoasterRig() {
   );
 }
 
-/** Drop Tower: a vertical spine on every lattice corner, pulse climbing the mast. */
-function DropTowerRig() {
-  const { look } = RIDE_LOOK.tower;
-  const spines = useMemo(() => {
+/**
+ * UFO Pendulum: the two A-frames, the bearing they carry, and the pad ring.
+ *
+ * Ground-fixed structure only. The arm and the saucer are the parts that MOVE,
+ * and a strip of LEDs on a body swinging a hundred metres at thirty-four
+ * metres a second is a smear rather than a light — so the rig outlines what
+ * stands still, which is what a real one is lit on anyway.
+ *
+ * It carries the ride's own facing, because the frames straddle the swing
+ * plane: drawing them square to the world would lay them across the arc.
+ */
+function UfoPendulumRig() {
+  const { look } = RIDE_LOOK.ufo;
+
+  const frames = useMemo(() => {
     const pts: THREE.Vector3[] = [];
-    const perCorner = BAY_COUNT * 2;
-    for (const [sx, sz] of [
-      [1, 1],
-      [1, -1],
-      [-1, 1],
-      [-1, -1],
-    ] as [number, number][]) {
-      for (let i = 0; i <= perCorner; i++) {
-        pts.push(new THREE.Vector3(sx * TOWER_HALF, (i / perCorner) * DROP_TOWER_HEIGHT, sz * TOWER_HALF));
+    const perLeg = 16;
+    for (const side of [-1, 1]) {
+      for (const foot of [-1, 1]) {
+        for (let i = 0; i <= perLeg; i++) {
+          const f = i / perLeg;
+          pts.push(
+            new THREE.Vector3(
+              0,
+              f * UFO_BEARING_Y,
+              (side * UFO_SPREAD) / 2 + foot * UFO_FOOT_SPREAD * (1 - f),
+            ),
+          );
+        }
       }
     }
     return pts;
   }, []);
-  const beacon = useMemo(() => ringPoints(TOWER_HALF * 1.6, 10, DROP_TOWER_HEIGHT + 1.6), []);
-  const deck = useMemo(() => ringPoints(STATION_OUTER_R, 44, 2.1), []);
-  const apron = useMemo(() => ringPoints(FOUNDATION_RADIUS + 5.5, 40, 0.2), []);
+
+  const bearing = useMemo(
+    () =>
+      linePoints(
+        [0, UFO_BEARING_Y, -UFO_SPREAD / 2],
+        [0, UFO_BEARING_Y, UFO_SPREAD / 2],
+        12,
+      ),
+    [],
+  );
+  const apron = useMemo(() => ringPoints(UFO_PAD_RADIUS, 44, 0.2), []);
 
   return (
-    <group position={[TOWER_ORIGIN[0], 0, TOWER_ORIGIN[2]]}>
-      {/* Phase runs 0 at the base to 1 at the top on each corner, so the pulse climbs. */}
-      <LedStrip points={spines} look={{ ...look, cycles: 4 }} size={0.3} haloScale={4.2} />
-      {/* Crown beacon: the tower's own violet at its brightest, pulsing fast.
-          It used to flash red and amber, which is the Dragon Ride's assignment. */}
-      <LedStrip points={beacon} look={{ ...look, colorA: look.colorB, colorB: "#ffffff", speed: 0.8, base: 0.5, gain: 2 }} size={0.42} />
-      <LedStrip points={deck} look={{ ...look, base: 0.5, gain: 0.9, cycles: 6 }} size={0.22} />
+    <group position={UFO_ORIGIN} rotation={[0, UFO_FACING, 0]}>
+      {/* Phase runs 0 at the feet to 1 at the head, so the pulse climbs. */}
+      <LedStrip points={frames} look={{ ...look, cycles: 4 }} size={0.3} haloScale={4.2} />
+      {/* The bearing shaft, at the ride's brightest — its one fixed landmark. */}
+      <LedStrip
+        points={bearing}
+        look={{ ...look, colorA: look.colorB, colorB: "#ffffff", speed: 0.8, base: 0.5, gain: 2 }}
+        size={0.42}
+      />
       <LedStrip points={apron} look={{ ...look, base: 0.3, gain: 1 }} size={0.2} />
     </group>
   );
@@ -335,8 +363,8 @@ export function RideLights({ id }: { id: DepartmentRideId }) {
       return <FerrisRig />;
     case "coaster":
       return <CoasterRig />;
-    case "tower":
-      return <DropTowerRig />;
+    case "ufo":
+      return <UfoPendulumRig />;
     case "dragon":
       return <DragonRig />;
     case "monster":
@@ -350,7 +378,7 @@ export function RideLights({ id }: { id: DepartmentRideId }) {
 export const RIG_REACH: Record<string, number> = {
   ferris: (WHEEL_CENTER_HEIGHT + WHEEL_RADIUS) * PARK_SCALE,
   coaster: 0,
-  tower: DROP_TOWER_HEIGHT + 1.6,
+  ufo: UFO_BEARING_Y + UFO_HEAD_HEIGHT,
   dragon: APEX_HEIGHT * PARK_SCALE,
   monster: MONSTER_TOWER * PARK_SCALE,
 };

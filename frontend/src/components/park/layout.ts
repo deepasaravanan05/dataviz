@@ -1,7 +1,11 @@
 import { WHEEL_RADIUS as FERRIS_R, BASE_WIDTH } from "@/components/ferris-wheel/constants";
+import { UNIFORM_RIDE_HEIGHT } from "./uniformRideHeight";
 import { COASTER_ORIGIN } from "@/components/roller-coaster/constants";
 import { MONSTER_ORIGIN, RIDE_REACH as MONSTER_REACH, TOWER_HEIGHT } from "@/components/monster-ride/constants";
-import { TOWER_REACH } from "@/components/drop-tower/gondolaBreadth";
+import {
+  OVERALL_HEIGHT as UFO_HEIGHT,
+  OVERALL_REACH as UFO_REACH,
+} from "@/components/ufo-pendulum/constants";
 import { DRAGON_ORIGIN, FOOT_SPREAD_X } from "@/components/dragon-ride/constants";
 import { PARK_SCALE, TOWER_SHIFT_X } from "./parkScale";
 
@@ -141,11 +145,27 @@ const RIDE_SIZING_EMPLOYEE_HEIGHT = 12;
  * Ride a little over three, and a ride's footprint is so many of them across.
  */
 const RIDE_TARGET_EMPLOYEES: Record<string, { halfX: number; halfZ: number; height: number }> = {
-  /* The tower is asked for exactly the footprint it has, so the width ratio
-     equals the height ratio and the solved factor stays the height-capped 1.2
-     however broad the gondola becomes. Broadening the disc must not shrink the
-     mast. */
-  tower: { halfX: TOWER_REACH / 12, halfZ: TOWER_REACH / 12, height: 105 / 12 },
+  /*
+   * THE UFO PENDULUM HOLDS THE SLOT THE DROP TOWER USED TO.
+   *
+   * The tower was removed at the user's request and this ride put in its
+   * place, plot and department and all.
+   *
+   * ITS TARGET IS ITS OWN ENVELOPE, divided back out by the park-wide growth
+   * factor so that `solveRideScale` returns exactly 1 and the ride is drawn at
+   * the size it declares. Every other ride is happy to be scaled here because
+   * its geometry is all that changes. This one is not: its arm is a PENDULUM,
+   * and a pendulum's period goes as the square root of its length, so
+   * stretching the model by a fifth without touching pendulum.ts would leave a
+   * 47 m arm swinging at a 39 m arm's rate — a machine that no longer obeys
+   * the energy equation the whole ride is derived from. If it should be
+   * bigger, ARM_LENGTH is the knob, and the physics follows it.
+   */
+  ufo: {
+    halfX: UFO_REACH / 12 / RIDE_WIDTH_GROWTH,
+    halfZ: UFO_REACH / 12 / RIDE_WIDTH_GROWTH,
+    height: UFO_HEIGHT / 12 / RIDE_WIDTH_GROWTH,
+  },
   dragon: { halfX: 55 / 12, halfZ: 65 / 12, height: 70 / 12 },
   ferris: { halfX: 28 / 12, halfZ: 28 / 12, height: 63 / 12 },
   /*
@@ -178,6 +198,20 @@ const RIDE_TARGET_BASE: Record<string, { halfX: number; halfZ: number; height: n
     ]),
   );
 
+/**
+ * AND THEN EVERY RIDE WAS ASKED TO BE THE SAME SIZE.
+ *
+ * "all the rides must be in a same size" — so the height target above is
+ * replaced, for every ride, by the park's one common height. The footprint
+ * figures are kept exactly as they were, because they are still the record of
+ * what each ride was once asked to be and `verify-park-scale.ts` reports the
+ * gap; they are simply no longer what decides the scale. A ride is one uniform
+ * factor, and with the heights all equal that factor is fixed by the height
+ * alone — so the footprint is whatever the model's own proportions make it.
+ *
+ * That is the trade the brief chose: rides the same size need room, and the
+ * solver below re-places them to find it.
+ */
 export const RIDE_TARGET: Record<string, { halfX: number; halfZ: number; height: number }> =
   Object.fromEntries(
     Object.entries(RIDE_TARGET_BASE).map(([id, t]) => [
@@ -185,7 +219,7 @@ export const RIDE_TARGET: Record<string, { halfX: number; halfZ: number; height:
       {
         halfX: t.halfX * RIDE_WIDTH_GROWTH,
         halfZ: t.halfZ * RIDE_WIDTH_GROWTH,
-        height: t.height * RIDE_WIDTH_GROWTH,
+        height: UNIFORM_RIDE_HEIGHT,
       },
     ]),
   );
@@ -195,24 +229,26 @@ export const RIDE_TARGET: Record<string, { halfX: number; halfZ: number; height:
  *
  * UNIFORM, ALWAYS. A ride is multiplied by a single number on every axis, so
  * nothing is ever stretched: the models keep the proportions they were designed
- * with. That means a ride whose own aspect ratio differs from the requested
- * footprint cannot hit all three targets at once, and the factor chosen is the
- * one that minimises the WORST relative error across height, width and depth —
- * with one rule on top: a ride may come out shorter than the height asked for,
- * never taller, because the heights are the headline numbers and overshooting
- * them would read as ignoring them.
+ * with.
  *
- * `verify-park-scale.ts` prints what each ride actually lands at against what
- * was asked for, so any gap is stated rather than hidden.
+ * IT USED TO BE A COMPROMISE. Each ride had its own height, width and depth
+ * target, no single factor could hit all three, and this solved the minimax —
+ * the uniform factor whose worst error across the three was as small as it
+ * could be, capped so a ride never overshot its height.
+ *
+ * NOW EVERY RIDE IS THE SAME HEIGHT, so there is nothing left to compromise:
+ * one target, one ratio, and the footprint follows. A ride that was 63 m tall
+ * and one that was 127 m are both 127 m now, which means the shorter one grew
+ * on the ground as well — the Monster Ride doubles — and that is why the
+ * placement solver below has real work to do for the first time.
+ *
+ * `verify-park-scale.ts` prints what each ride lands at against what its
+ * footprint was once asked to be, so the gap is stated rather than hidden.
  */
 function solveRideScale(raw: { halfX: number; halfZ: number; height: number }, id: string): number {
   const t = RIDE_TARGET[id];
   if (!t) return PARK_SCALE;
-  const ratios = [t.height / raw.height, t.halfX / raw.halfX, t.halfZ / raw.halfZ];
-  /* Minimax in log space: the geometric mean of the smallest and largest ratio
-     is the uniform factor whose worst error is as small as it can be. */
-  const minimax = Math.sqrt(Math.min(...ratios) * Math.max(...ratios));
-  return Math.min(minimax, t.height / raw.height);
+  return t.height / raw.height;
 }
 
 
@@ -294,9 +330,13 @@ const RAW_RIDES: RawRide[] = [
   { id: "dragon", label: "Dragon Ride", halfX: 26.5, halfZ: (19.5 + FOOT_SPREAD_X) / 2, height: 34.0, origin: [DRAGON_ORIGIN[0], DRAGON_BOX_CENTER_Z], desired: [-72.3, 117.7] },
   { id: "coaster", label: "Roller Coaster", halfX: 32, halfZ: 24, height: 30.0000, origin: [COASTER_BOX_CENTER_X, 0], desired: [70, -10] },
   { id: "monster", label: "Monster Ride", halfX: MONSTER_REACH, halfZ: MONSTER_REACH, height: TOWER_HEIGHT, origin: [MONSTER_ORIGIN[0], MONSTER_ORIGIN[2]], desired: [205, 90 - RIDE_STEP_BACK] },
-  /* The Drop Tower positions itself directly from TOWER_CENTER rather than from
-     an offset, so its anchor is the origin whatever it is scaled by. */
-  { id: "tower", label: "Drop Tower", halfX: TOWER_REACH, halfZ: TOWER_REACH, height: 105, origin: [0, 0], desired: [270 + TOWER_SHIFT_X, 280 - RIDE_STEP_BACK] },
+  /* The UFO Pendulum positions itself directly from its layout centre rather
+     than from an offset, exactly as the Drop Tower it replaced did, so its
+     anchor is the origin. It keeps the tower's DESIRED position unchanged —
+     that is what "in that place" meant — including the tower's own three-step
+     shift, which is left in parkScale.ts under its old name rather than
+     renamed, because moving the ride was never the point of it. */
+  { id: "ufo", label: "UFO Pendulum", halfX: UFO_REACH, halfZ: UFO_REACH, height: UFO_HEIGHT, origin: [0, 0], desired: [270 + TOWER_SHIFT_X, 280 - RIDE_STEP_BACK] },
 ];
 
 /** The factor each ride is actually built at. Solved once, read everywhere. */
@@ -358,11 +398,83 @@ function place(r: RideFootprint, center: [number, number]): PlacedRide {
  * already valid — it exists so that changing a ride's size can never silently
  * produce an overlap.
  */
+/**
+ * The views the ride fan is designed for, and now solved against.
+ *
+ * The park's whole layout argument is that from the entrance the five rides
+ * spread left to right with sky between them. That used to be true by
+ * construction — the desired fan was drawn that way and the rides were small
+ * enough to keep it. Building every ride to one common height doubled some
+ * footprints, and at those sizes the Monster Ride and the UFO Pendulum
+ * overlapped by fourteen degrees: the fan was still a fan, but two of its
+ * silhouettes had grown into each other.
+ *
+ * So the separation is now SOLVED rather than assumed, from the same three
+ * viewpoints `verify-park-layout.ts` checks. The rule is the park's own:
+ * rides are pushed apart until their silhouettes have clear sky between them.
+ */
+const VIEW_FAMILY: [number, number][] = [MAIN_VIEWPOINT, [70, 780], [70, 520]];
+/* A little clear of the threshold the checks use, so the solver lands inside
+   it rather than exactly on it. */
+const SIGHTLINE_TARGET_DEG = 0.5;
+
+/** Where a ride sits in a view: its bearing, and how wide it looks from there. */
+function viewSlice(
+  center: [number, number],
+  reach: number,
+  view: [number, number],
+  axis: [number, number],
+): { bearing: number; half: number; distance: number; tangent: [number, number] } {
+  const dx = center[0] - view[0];
+  const dz = center[1] - view[1];
+  const distance = Math.hypot(dx, dz) || 1;
+  const bearing =
+    (Math.atan2(axis[0] * dz - axis[1] * dx, dx * axis[0] + dz * axis[1]) * 180) / Math.PI;
+  const half = (Math.atan(reach / distance) * 180) / Math.PI;
+  /* Perpendicular to the line of sight: moving along it changes the bearing
+     and nothing else, which is exactly the push this needs. */
+  return { bearing, half, distance, tangent: [-dz / distance, dx / distance] };
+}
+
 function resolveOverlaps(rides: RideFootprint[]): PlacedRide[] {
   const centers = rides.map((r) => [...r.desired] as [number, number]);
 
-  for (let pass = 0; pass < 200; pass++) {
+  const axes = VIEW_FAMILY.map((v) => {
+    const ax = PARK_CENTER[0] - v[0];
+    const az = PARK_CENTER[1] - v[1];
+    const al = Math.hypot(ax, az) || 1;
+    return [ax / al, az / al] as [number, number];
+  });
+
+  for (let pass = 0; pass < 600; pass++) {
     let worst = 0;
+
+    /* ---- clear sky between silhouettes, from every view in the family ---- */
+    for (let v = 0; v < VIEW_FAMILY.length; v++) {
+      for (let i = 0; i < rides.length; i++) {
+        for (let j = i + 1; j < rides.length; j++) {
+          const reachI = Math.hypot(rides[i].halfX, rides[i].halfZ);
+          const reachJ = Math.hypot(rides[j].halfX, rides[j].halfZ);
+          const a = viewSlice(centers[i], reachI, VIEW_FAMILY[v], axes[v]);
+          const b = viewSlice(centers[j], reachJ, VIEW_FAMILY[v], axes[v]);
+          const gapDeg = Math.abs(a.bearing - b.bearing) - (a.half + b.half);
+          if (gapDeg >= SIGHTLINE_TARGET_DEG) continue;
+
+          const deficit = SIGHTLINE_TARGET_DEG - gapDeg;
+          worst = Math.max(worst, deficit);
+
+          /* Slide each one sideways along its own line of sight, away from the
+             other — half the angle each, converted to metres at its distance. */
+          const dir = a.bearing >= b.bearing ? 1 : -1;
+          const stepA = ((deficit / 2) * Math.PI) / 180 * a.distance * 0.5;
+          const stepB = ((deficit / 2) * Math.PI) / 180 * b.distance * 0.5;
+          centers[i][0] += a.tangent[0] * stepA * dir;
+          centers[i][1] += a.tangent[1] * stepA * dir;
+          centers[j][0] -= b.tangent[0] * stepB * dir;
+          centers[j][1] -= b.tangent[1] * stepB * dir;
+        }
+      }
+    }
 
     for (let i = 0; i < rides.length; i++) {
       for (let j = i + 1; j < rides.length; j++) {
@@ -406,12 +518,6 @@ export function rideById(id: string): PlacedRide {
   if (!r) throw new Error(`Unknown ride in park layout: ${id}`);
   return r;
 }
-
-/**
- * The Drop Tower's final centre. It is not inside the scaled group, so it
- * positions itself directly from this rather than from an offset.
- */
-export const TOWER_CENTER: [number, number] = rideById("tower").center;
 
 /** Layout offset the scene applies to a ride, as an R3F position triple. */
 export function offsetFor(id: string): [number, number, number] {
