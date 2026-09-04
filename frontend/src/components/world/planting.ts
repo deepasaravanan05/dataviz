@@ -1,6 +1,8 @@
-import { TRACK_CURVE } from "@/components/park-train/trainTrack";
-import { TRAIN_SCALE } from "@/components/park/parkScale";
-import { TRACK_HALF_WIDTH_METRES } from "@/components/park-train/constants";
+import {
+  BOUNDARY_RADIUS,
+  LAKE_CLEARANCE_RADIUS,
+  PARK_ORIGIN,
+} from "@/components/park/parkRing";
 import {
   FOOD_COURT_CENTER,
   FOOD_COURT_HALF,
@@ -10,7 +12,8 @@ import {
 } from "@/simulation/journey/constants";
 import { PARK_LAYOUT } from "@/components/park/layout";
 import { RIDE_SIGNS } from "@/components/park/rideSigns";
-import { OVERALL_REACH, RIDE_CENTER } from "@/components/flying-chairs/constants";
+import { OVERALL_REACH } from "@/components/flying-chairs/constants";
+import { RIDE_CENTER } from "@/components/flying-chairs/placement";
 import { OVERALL_REACH as LOOPER_REACH } from "@/components/super-looper/constants";
 import { RIDE_CENTER as LOOPER_CENTER } from "@/components/super-looper/placement";
 import { OVERALL_REACH as TEACUPS_REACH } from "@/components/tea-cups/constants";
@@ -69,7 +72,6 @@ function mulberry32(seed: number) {
 }
 
 /** Clear grass either side of the sleeper ends, before anything is planted. */
-const TRACK_VERGE = 3;
 
 /**
  * The landscaped envelope: the park proper plus its approach.
@@ -100,6 +102,16 @@ const FIELD_BOUNDS = (() => {
     maxZ = Math.max(maxZ, z + reach);
   };
   for (const r of PARK_LAYOUT) take(r.center[0], r.center[1], Math.max(r.halfX, r.halfZ));
+  /*
+   * AND THE WHOLE PROPERTY. The field used to be the bounding box of the rides
+   * plus a margin, which was the park while the park was the rides. It is not
+   * any more: a concentric plan has a perimeter road and a landscaped setback
+   * outside its outermost attraction, and left as it was the planting stopped
+   * two hundred metres short of the fence with bare grass beyond it. Planting
+   * is a DENSITY here, so widening the field grows the count with it rather
+   * than spreading the same trees thinner.
+   */
+  take(PARK_ORIGIN[0], PARK_ORIGIN[1], BOUNDARY_RADIUS - FIELD_MARGIN);
   take(RIDE_CENTER[0], RIDE_CENTER[1], OVERALL_REACH);
   take(LOOPER_CENTER[0], LOOPER_CENTER[1], LOOPER_REACH);
   take(TEACUPS_CENTER[0], TEACUPS_CENTER[1], TEACUPS_REACH);
@@ -131,24 +143,6 @@ const SPREAD_MAKEUP = 2;
 const TREE_DENSITY = (600 * SPREAD_MAKEUP) / (Math.PI * 640 * 720);
 const SHRUB_DENSITY = (2200 * SPREAD_MAKEUP) / (Math.PI * 640 * 720);
 
-const trackPoints: [number, number][] = (() => {
-  const pts: [number, number][] = [];
-  for (let i = 0; i <= 500; i++) {
-    const p = TRACK_CURVE.getPointAt(i / 500);
-    pts.push([p.x * TRAIN_SCALE, p.z * TRAIN_SCALE]);
-  }
-  return pts;
-})();
-
-function trackDistance(x: number, z: number): number {
-  let m = Infinity;
-  for (const [px, pz] of trackPoints) {
-    const d = Math.hypot(x - px, z - pz);
-    if (d < m) m = d;
-    if (m < 4) return m;
-  }
-  return m;
-}
 
 function inField(x: number, z: number): boolean {
   const dx = (x - FIELD_CENTER[0]) / FIELD_RX;
@@ -159,15 +153,23 @@ function inField(x: number, z: number): boolean {
 /** Everything a plant must keep away from, in metres of clearance required. */
 function obstruction(x: number, z: number): number {
   let m = distanceToPaving(x, z) - 1.5;
+  /*
+   * THE LAKE. The middle of the park is open water with a rock cascade
+   * standing in it, and a tree in the middle of a lake is the one planting
+   * mistake nobody would miss. The keep-out is the stone shore plus its own
+   * margin, so the greenery starts on the bank.
+   */
+  m = Math.min(
+    m,
+    Math.hypot(x - PARK_ORIGIN[0], z - PARK_ORIGIN[1]) - LAKE_CLEARANCE_RADIUS,
+  );
   m = Math.min(m, distanceToRide(x, z) - 6);
   /*
-   * Off the railway, not merely off its centre line. This used to be a flat
-   * 7 m, which was already less than the old track's half-width and became
-   * far less when the gauge was widened by ten metres — the difference is a
-   * shrub growing between the rails. `TRACK_HALF_WIDTH_METRES` follows the
-   * gauge, so the verge stays a verge whatever the track does.
+   * THE RAILWAY USED TO BE MEASURED HERE — a verge either side of the rails so
+   * that nothing grew between them. The train and its track have been removed
+   * from the park, so there is no railway left to keep clear of, and the
+   * ground it occupied is now planted like the rest of the park.
    */
-  m = Math.min(m, trackDistance(x, z) - (TRACK_HALF_WIDTH_METRES + TRACK_VERGE));
   /*
    * The Flying Chairs were added to the park after this planting was laid out,
    * so they get the same keep-out every other attraction already had —

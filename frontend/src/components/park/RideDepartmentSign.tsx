@@ -16,7 +16,6 @@ import {
   type RideSign,
   type TeamSign,
 } from "./rideSigns";
-import { TRAIN_TEAM_ID } from "./trainTeam";
 import { CHAIRS_TEAM_ID } from "@/components/flying-chairs/constants";
 import { LOOPER_RIDE_ID } from "@/components/super-looper/constants";
 import { LOOPER_SIGN } from "@/components/super-looper/sign";
@@ -60,7 +59,6 @@ function Sign({ sign }: { sign: RideSign | TeamSign }) {
        anybody to them, so there is no active department to read and their
        boards always say what their own modules say. */
     if (
-      sign.rideId === TRAIN_TEAM_ID ||
       sign.rideId === CHAIRS_TEAM_ID ||
       sign.rideId === LOOPER_RIDE_ID ||
       sign.rideId === TEACUPS_RIDE_ID ||

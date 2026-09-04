@@ -1,4 +1,10 @@
 import { readFileSync } from "node:fs";
+import {
+  PARK_ORIGIN,
+  PLOT_MARGIN,
+  ringCenterOf,
+  type RingRideId,
+} from "../src/components/park/parkRing";
 import { join } from "node:path";
 import {
   ARM_LENGTH,
@@ -59,7 +65,7 @@ import { MAX_FLIGHT_RISE, STAIR_RISE } from "../src/simulation/journey/boardingS
 import { RIDE_CENTER, RIDE_FACING } from "../src/components/ufo-pendulum/placement";
 import { PALETTE } from "../src/components/ufo-pendulum/constants";
 import { countSeatColor, validateRiders } from "../src/components/ufo-pendulum/riders";
-import { RIDE_ORDER, rideForDepartment } from "../src/components/park/departments";
+import { RIDE_ORDER, departmentFor, rideForDepartment } from "../src/components/park/departments";
 import { boardingSeats, rideSeatCount, seatPose } from "../src/simulation/journey/rideKinematics";
 import { stairFor } from "../src/simulation/journey/boardingStair";
 import { RIDE_LOOK } from "../src/components/world/rideLighting";
@@ -81,10 +87,7 @@ import {
   viewAngles,
 } from "../src/components/park/layout";
 import { RIDE_SIGNS, TEAM_SIGNS } from "../src/components/park/rideSigns";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRACK_HALF_WIDTH_METRES } from "../src/components/park-train/constants";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
-import { distanceToPaving } from "../src/components/world/paths";
+import { RIDE_PLOTS, type RidePlot } from "../src/components/world/paths";
 import { PARK_SHRUBS, PARK_TREES } from "../src/components/world/planting";
 import { JOURNEY_EMPLOYEES } from "../src/simulation/journey/journey";
 import {
@@ -93,8 +96,8 @@ import {
 } from "../src/simulation/journey/constants";
 import {
   OVERALL_REACH as CHAIRS_REACH,
-  RIDE_CENTER as CHAIRS_CENTER,
 } from "../src/components/flying-chairs/constants";
+import {RIDE_CENTER as CHAIRS_CENTER} from "../src/components/flying-chairs/placement";
 import { HUMAN } from "../src/world/scale";
 
 /**
@@ -602,12 +605,23 @@ check(
  * five boxes rather than six.
  */
 check(
-  "it still holds the tower's slot in the fan rather than being added beside it",
-  PARK_LAYOUT.length === 5 &&
-    PARK_LAYOUT.some((r) => r.id === "ufo") &&
-    !PARK_LAYOUT.some((r) => r.id === "tower"),
-  `${PARK_LAYOUT.length} rides in the solver: ${PARK_LAYOUT.map((r) => r.id).join(", ")}, ` +
-    `pendulum at (${rx.toFixed(1)}, ${rz.toFixed(1)})`,
+  /*
+   * REPLACED, not added beside. The count that used to prove it — five boxes in
+   * the solver — has since moved for an unrelated reason: the Giga Coaster was
+   * listed in the layout when DevOps were given it to ride. So the property is
+   * stated directly instead, which is what it always meant: this ride is in the
+   * layout, the Drop Tower is not, and every ride stands on its own ring slot
+   * so that listing one can never shift another.
+   */
+  "it still holds the tower's slot rather than being added beside it",
+  PARK_LAYOUT.some((r) => r.id === "ufo") &&
+    !PARK_LAYOUT.some((r) => r.id === "tower") &&
+    PARK_LAYOUT.every((r) => {
+      const slot = ringCenterOf(r.id as RingRideId);
+      return Math.hypot(r.center[0] - slot[0], r.center[1] - slot[1]) < 1e-9;
+    }),
+  `${PARK_LAYOUT.length} rides in the layout: ${PARK_LAYOUT.map((r) => r.id).join(", ")}, ` +
+    `each on its own ring slot; pendulum at (${rx.toFixed(1)}, ${rz.toFixed(1)})`,
 );
 
 check(
@@ -619,19 +633,26 @@ check(
 );
 {
   /*
-   * THE ARC FACES THE ENTRANCE BROADSIDE. Measured, not assumed: the ride's
-   * local +X is the swing direction, and after the group's Y rotation it must
-   * come out perpendicular to the line of sight from the park's viewpoint.
+   * THE ARC FACES THE PARK BROADSIDE. Measured, not assumed: the ride's local
+   * +X is the swing direction, and after the group's Y rotation it must come
+   * out perpendicular to the line from the ride to the middle of the park.
+   *
+   * IT USED TO BE MEASURED AGAINST THE MAIN ENTRANCE, which was the same thing
+   * while every ride stood in a fan in front of the gate. On a ring it is not:
+   * this ride is round the side, and people reach it off the RING PATH, which
+   * runs inside it. A pendulum swinging towards you reads as a dot going up
+   * and down; the rule is that it must swing ACROSS the people looking at it,
+   * and the people are now in the middle of the park.
    */
   const swingX = Math.cos(RIDE_FACING);
   const swingZ = -Math.sin(RIDE_FACING);
-  const viewX = rx - MAIN_VIEWPOINT[0];
-  const viewZ = rz - MAIN_VIEWPOINT[1];
+  const viewX = rx - PARK_ORIGIN[0];
+  const viewZ = rz - PARK_ORIGIN[1];
   const viewLen = Math.hypot(viewX, viewZ);
   const dot = (swingX * viewX + swingZ * viewZ) / viewLen;
   const angle = (Math.acos(Math.min(1, Math.abs(dot))) * 180) / Math.PI;
   check(
-    "the swing reads broadside from the entrance, not end-on",
+    "the swing reads broadside from the ring path, not end-on",
     Math.abs(angle - 90) < 1e-6,
     `${angle.toFixed(6)}° between the swing direction and the line of sight`,
   );
@@ -711,14 +732,17 @@ check(
  * hardest.
  */
 check(
-  "Data Engineering walks here — the department came with the plot",
-  rideForDepartment("Data Engineering").rideId === "ufo" &&
-    rideForDepartment("Data Engineering").rideName === "UFO Pendulum",
-  `Data Engineering → ${rideForDepartment("Data Engineering").rideName}`,
+  "data walks here — the department came with the plot",
+  rideForDepartment("data").rideId === "ufo" &&
+    rideForDepartment("data").rideName === "UFO Pendulum",
+  `data → ${rideForDepartment("data").rideName}`,
 );
 check(
-  "and it is one of the park's five routing destinations, not a sixth",
-  RIDE_ORDER.length === 5 && RIDE_ORDER.includes("ufo") && !RIDE_ORDER.includes("tower" as never),
+  /* It took the tower's place in the routing order rather than being appended
+     to it — which is still true, and still what this is about, now that the
+     Giga Coaster HAS been appended to it. */
+  "and it holds the tower's place among the routing destinations",
+  RIDE_ORDER.indexOf("ufo") === 3 && !RIDE_ORDER.includes("tower" as never),
   RIDE_ORDER.join(", "),
 );
 check(
@@ -774,8 +798,11 @@ check(
   );
 }
 check(
+  /* The chip reads the departments the ride serves, joined the way every
+     surface in the park joins them, and then the ride's own name. Asserted as
+     that rule rather than as one dataset's spelling of one department. */
   "it is reachable by fast travel under its own name",
-  placeById("ufo").label.startsWith("Data Engineering — "),
+  placeById("ufo").label === `${departmentFor("ufo").department} — UFO Pendulum`,
   placeById("ufo").label,
 );
 check(
@@ -834,11 +861,6 @@ check(
 
 /* ================= 7. NOTHING ELSE MOVED, AND IT CLEARS EVERYTHING ================= */
 
-const rails: [number, number][] = [];
-for (let i = 0; i <= 720; i++) {
-  const p = TRACK_CURVE.getPointAt(i / 720);
-  rails.push([p.x * TRAIN_SCALE, p.z * TRAIN_SCALE]);
-}
 const SIGNS = [...RIDE_SIGNS, ...TEAM_SIGNS];
 
 check(
@@ -868,15 +890,19 @@ check(
 );
 check(
   "and its team boards are untouched",
-  TEAM_SIGNS.length === 2 && RIDE_SIGNS.length === 5,
-  `${RIDE_SIGNS.length} ride signs, ${TEAM_SIGNS.length} team boards, as before`,
+  /* One team board, not two: the Park Train's DevOps board went with the train
+     when the railway was removed. There is a ride sign per department ride —
+     six of them since the Giga Coaster took DevOps — and this check is about
+     the Drop Tower's removal not having disturbed the signage, which it has
+     not. */
+  TEAM_SIGNS.length === 1 && RIDE_SIGNS.length === RIDE_ORDER.length,
+  `${RIDE_SIGNS.length} ride signs, ${TEAM_SIGNS.length} team board`,
 );
 
 /*
  * CLEARANCE, measured on the SWEPT arc rather than on the structure — a tree
  * or a rail under the saucer's path is a tree the ride goes through.
  */
-const toRail = Math.min(...rails.map(([x, z]) => Math.hypot(rx - x, rz - z)));
 const toSign = Math.min(...SIGNS.map((s) => Math.hypot(rx - s.position[0], rz - s.position[1])));
 const toChairs = Math.hypot(rx - CHAIRS_CENTER[0], rz - CHAIRS_CENTER[1]) - CHAIRS_REACH;
 const toBox = Math.min(
@@ -890,17 +916,7 @@ const SOLID_MAX = Math.max(SOLID_X, SOLID_Z, PAD_RADIUS);
 
 for (const [what, distance, margin] of [
   ["every other ride footprint", toBox, 12],
-  ["the railway", toRail - TRACK_HALF_WIDTH_METRES, 10],
   ["every signboard", toSign, 8],
-  /*
-   * PAVING IS MEASURED AGAINST THE STRUCTURE, not the arc — and it is the one
-   * row here that is. Every other neighbour on this list is a thing that
-   * stands up: a ride, a rail, a signboard, a building. Paving lies flat, and
-   * the part of this ride that reaches out over it is a saucer fifty metres in
-   * the air. Holding the arc 6 m clear of every path would mean no department
-   * ride could have a path to it at all.
-   */
-  ["the paving, under its standing structure", distanceToPaving(rx, rz) - SOLID_MAX, 6],
   ["the plaza ring", Math.abs(Math.hypot(rx - PLAZA_CENTER[0], rz - PLAZA_CENTER[1]) - PLAZA_RADIUS), 8],
   [
     "the food court",
@@ -920,6 +936,30 @@ for (const [what, distance, margin] of [
       (what.startsWith("the paving")
         ? ` (${margin} m beyond a ${SOLID_MAX.toFixed(1)} m structure)`
         : ` (reach ${OVERALL_REACH.toFixed(1)} + ${margin})`),
+  );
+}
+
+/*
+ * IT STANDS ON A PAVED PLATFORM — which is why "it clears the paving" is gone.
+ *
+ * That row required six metres of open grass between this ride and any paved
+ * surface, so the machine read as standing IN the park rather than ON a path.
+ * The master plan reverses it in as many words: every attraction stands in the
+ * middle of an identical circular platform, and the paths "must reach the ride
+ * entrance/platform clearly and completely". The paving under this ride is the
+ * plan, not an encroachment.
+ *
+ * What the old row protected — that the ride is not overhanging the surface it
+ * sits on — is asserted directly instead, against the plan's own plot size.
+ */
+{
+  const plot = RIDE_PLOTS.find((p: RidePlot) => p.id === "ufo")!;
+  check(
+    "it stands centred on its own platform, with room to spare",
+    Math.hypot(rx - plot.center[0], rz - plot.center[1]) < 1e-9 &&
+      OVERALL_REACH + PLOT_MARGIN <= plot.radius + 1e-9,
+    `a ${(plot.radius * 2).toFixed(0)} m platform under a ${(OVERALL_REACH * 2).toFixed(0)} m ride, ` +
+      `${(plot.radius - OVERALL_REACH).toFixed(0)} m of platform showing all round`,
   );
 }
 check(

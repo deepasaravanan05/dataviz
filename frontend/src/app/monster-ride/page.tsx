@@ -85,12 +85,6 @@ export default function MonsterRidePage() {
           Dragon Ride
         </Link>
         <Link
-          href="/park-train"
-          className="rounded-full bg-black/65 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-black/80"
-        >
-          Park Train
-        </Link>
-        <Link
           href="/roller-coaster"
           className="rounded-full bg-black/65 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-black/80"
         >

@@ -276,7 +276,14 @@ function Tubes({
 
 export function BoardingStairs() {
   const pieces = useMemo(
-    () => buildPieces(DEPARTMENT_RIDE_IDS.map((id) => BOARDING_STAIRS[id])),
+    /*
+     * The Giga Coaster is not drawn here. It boards through its own station —
+     * boards, canopy, rails and one straight flight, all drawn by
+     * `giga-coaster/Station.tsx` — and `boardingStair.ts` reads that station
+     * rather than solving a deck for it, so drawing one here would put a
+     * second platform on top of the first.
+     */
+    () => buildPieces(DEPARTMENT_RIDE_IDS.filter((id) => id !== "giga").map((id) => BOARDING_STAIRS[id])),
     [],
   );
 

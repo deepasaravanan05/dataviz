@@ -67,7 +67,9 @@ function PanelBody({ onClose }: { onClose: () => void }) {
       .map((e) => ({
         id: e.id,
         department: e.department,
-        delay: `${e.delayMinutes} min`,
+        /* The sheet's own Delay Time column, so the panel never prints a
+           number the workbook does not contain. */
+        delay: `${e.reportedDelayMinutes} min`,
       }));
   }, [occupants, employees]);
 

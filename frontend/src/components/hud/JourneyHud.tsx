@@ -80,6 +80,13 @@ export function JourneyHud() {
     [employees],
   );
 
+  /** The departments carrying the most delay, longest first. See below. */
+  const DEPARTMENT_BARS = 6;
+  const worstDepartments = useMemo(
+    () => [...delays.byDepartment].sort((a, b) => b.average - a.average).slice(0, DEPARTMENT_BARS),
+    [delays.byDepartment],
+  );
+
   const stages = useMemo(() => {
     let outside = 0;
     let walking = 0;
@@ -190,14 +197,29 @@ export function JourneyHud() {
           ))}
         </div>
 
+        {/*
+          THE WORST FEW DEPARTMENTS, not all of them.
+          It listed every department when the roster had six. The workbook has
+          thirteen, and thirteen bars would push the bottom of this panel off a
+          short screen — which would break the standing rule that the 2D
+          overlays stay compact at the edges and never cover the park. The
+          panel is a readout of where the delay is, so it shows where the delay
+          IS: the worst few, longest first, and a line saying how many are not
+          drawn. The full table is one click away under Department-wise Count.
+        */}
         <div className="mt-1.5 space-y-1 border-t border-white/[0.07] pt-1.5">
-          {delays.byDepartment.map((d) => (
+          {worstDepartments.map((d) => (
             <DelayBar key={d.key} label={d.label} average={d.average} max={delays.maxAverage} color="#7dd3fc" />
           ))}
+          {delays.byDepartment.length > worstDepartments.length && (
+            <div className="pt-0.5 text-[10px] text-white/35">
+              + {delays.byDepartment.length - worstDepartments.length} more departments
+            </div>
+          )}
         </div>
 
         <div className="mt-1.5 text-[10px] tabular-nums text-white/40">
-          Longest wait — {delays.worst.name} ({delays.worst.id}) {Math.round(delays.worst.delayMinutes)} min
+          Longest wait — {delays.worst.name} ({delays.worst.id}) {delays.worst.reportedDelayMinutes} min
         </div>
       </div>
 

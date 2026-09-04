@@ -14,7 +14,7 @@
  *   4. walking, the feet stay on the ground and the stride matches the pace
  *      the journey simulation actually moves the figure at;
  *   5. seated, the hips land on the chair and the feet reach the floor;
- *   6. thirty employees get thirty independent rigs, and one shared geometry.
+ *   6. every employee gets their own rig, and the whole cast shares one geometry.
  */
 import * as THREE from "three";
 import {
@@ -359,19 +359,22 @@ function poseAt(clip: THREE.AnimationClip, t: number): Record<BoneName, THREE.Ve
     createEmployeeRig({ skin: mat(), shirt: mat(), trousers: mat(), shoe: mat() }),
   );
 
+  /* One rig each, whatever the roster's size — the workbook's dates run from a
+     single employee to ninety-six, so the COUNT is the data's business and what
+     has to hold is the one-to-one. */
   check(
     "exactly one rig per employee in the roster",
-    rigs.length === 30 && JOURNEY_EMPLOYEES.length === 30,
+    rigs.length === JOURNEY_EMPLOYEES.length,
     `${rigs.length} rigs for ${JOURNEY_EMPLOYEES.length} employees`,
   );
   check(
     "every employee has their OWN skeleton and mixer",
     new Set(rigs.map((r) => r.skeleton)).size === rigs.length &&
       new Set(rigs.map((r) => r.mixer)).size === rigs.length,
-    "thirty independent poses — nobody walks in lockstep with anybody else",
+    `${rigs.length} independent poses — nobody walks in lockstep with anybody else`,
   );
   check(
-    "all thirty share one geometry upload",
+    "the whole cast shares one geometry upload",
     new Set(rigs.map((r) => r.mesh.geometry)).size === 1,
     `one BufferGeometry of ${position.count} vertices, instanced thirty times`,
   );

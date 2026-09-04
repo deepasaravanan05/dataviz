@@ -75,7 +75,10 @@ function occupantsAt(simTime: number): JourneyEmployee[] {
 
 // ============ 2. Nobody with no delay is ever in it ============
 {
-  const onTime = JOURNEY_EMPLOYEES.filter((e) => e.delayMinutes === 0);
+  /* "Delayed" is the sheet's own Delay Time column, which is what the routing
+     rule reads — nineteen rows of the workbook print "0 mins" beside timestamps
+     a few seconds apart, and the sheet's answer is the one that counts. */
+  const onTime = JOURNEY_EMPLOYEES.filter((e) => e.reportedDelayMinutes === 0);
   let everInside = 0;
   for (const e of onTime) {
     for (let t = e.spawnTime; t <= e.despawnTime; t += 0.05) {
@@ -89,8 +92,8 @@ function occupantsAt(simTime: number): JourneyEmployee[] {
   );
   check(
     "and everyone the sheet DOES delay passes through it",
-    JOURNEY_EMPLOYEES.filter((e) => e.delayMinutes > 0).every((e) => e.visitsFoodCourt),
-    `${JOURNEY_EMPLOYEES.filter((e) => e.delayMinutes > 0).length} delayed employees, ` +
+    JOURNEY_EMPLOYEES.filter((e) => e.reportedDelayMinutes > 0).every((e) => e.visitsFoodCourt),
+    `${JOURNEY_EMPLOYEES.filter((e) => e.reportedDelayMinutes > 0).length} delayed employees, ` +
       `every one of them shown inside at some point`,
   );
 }
@@ -175,7 +178,11 @@ function occupantsAt(simTime: number): JourneyEmployee[] {
   let wrong = 0;
   for (const e of JOURNEY_EMPLOYEES) {
     const row = rows.get(e.id)!;
-    if (e.id !== row.id || e.department !== row.department || e.delayMinutes !== row.delayMinutes) {
+    if (
+      e.id !== row.id ||
+      e.department !== row.department ||
+      Math.abs(e.delayMinutes - row.delayMinutes) > 1e-9
+    ) {
       wrong++;
     }
   }
@@ -189,11 +196,14 @@ function occupantsAt(simTime: number): JourneyEmployee[] {
   check(
     "the panel prints the ID, never the name",
     /e\.id/.test(panel) && !/\be\.name\b/.test(panel),
-    "employee.id, employee.department and employee.delayMinutes, and nothing else",
+    "employee.id, employee.department and the sheet's own delay column, and nothing else",
   );
   check(
+    /* It prints `reportedDelayMinutes` — the sheet's own Delay Time column, in
+       whole minutes — rather than the exact gap behind it, so the panel can
+       never show a number the workbook does not contain. */
     "the panel computes no delay of its own",
-    /e\.delayMinutes/.test(panel) && !/classifyDelay|workStart|checkIn/.test(panel),
+    /e\.reportedDelayMinutes/.test(panel) && !/classifyDelay|workStart|checkIn/.test(panel),
     "the delay column is printed, not recalculated",
   );
 }

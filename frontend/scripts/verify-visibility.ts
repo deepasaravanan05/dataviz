@@ -771,9 +771,9 @@ check(
 
 const RIDE_DIRS = [
   "ferris-wheel",
+  "park-train",
   "roller-coaster",
   "monster-ride",
-  "park-train",
   "dragon-ride",
   "ufo-pendulum",
 ];

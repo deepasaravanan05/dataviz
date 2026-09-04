@@ -10,12 +10,12 @@ import { Spider, Tower } from "./Tower";
 import {
   CANOPY_SOFFIT_Y,
   HANGER_RADIUS,
-  RIDE_CENTER,
   ROTATION_RADIANS_PER_SEC,
   ROTATION_SIGN,
   chairColor,
   validateFlyingChairs,
 } from "./constants";
+import { RIDE_CENTER } from "./placement";
 import { CYCLE_SECONDS, sweepAt } from "./liftCycle";
 import { SEAT_PLACEMENTS } from "./seatRing";
 

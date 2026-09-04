@@ -1,4 +1,4 @@
-import { rideById } from "@/components/park/layout";
+import { UNIFORM_RIDE_HEIGHT } from "@/components/park/uniformRideHeight";
 import { HUMAN, METRE, PROP } from "@/world/scale";
 
 /**
@@ -101,9 +101,19 @@ export const LOOPER_TEAM_NAME = "UI/UX";
  * has to meet the car floor.
  */
 
-/** The ride this one was told to match. */
+/**
+ * The ride this one was told to match — and the height that means.
+ *
+ * It used to read `rideById("dragon").height` out of the park layout. That was
+ * the honest expression of "match the Dragon Ride" while the layout was what
+ * decided a ride's height; it is no longer, because every ride in this park is
+ * built to the one common `UNIFORM_RIDE_HEIGHT` and the Dragon Ride's height
+ * IS that constant. Reading the shared height directly says the same thing and
+ * keeps this file a leaf — `parkRing.ts` has to measure this ride to place it,
+ * so a module the layout depends on may not itself depend on the layout.
+ */
 export const SIZE_MATCH_ID = "dragon";
-const TARGET_HEIGHT = rideById(SIZE_MATCH_ID).height;
+const TARGET_HEIGHT = UNIFORM_RIDE_HEIGHT;
 
 /* The machine at the size Larson build it, before that target is applied. */
 const REF_CAR_LENGTH = 1.45;
@@ -429,7 +439,7 @@ export function validateSuperLooper(): void {
     "The train's centre of mass cannot sit outside the rail it runs on",
   );
   console.assert(
-    Math.abs(OVERALL_HEIGHT - rideById(SIZE_MATCH_ID).height) < 1e-9,
+    Math.abs(OVERALL_HEIGHT - UNIFORM_RIDE_HEIGHT) < 1e-9,
     "The ride is not the height it was told to match",
   );
   console.assert(PLATFORM_Y > 0, "The platform is underground");

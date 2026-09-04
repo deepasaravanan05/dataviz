@@ -1,3 +1,4 @@
+import { BOUNDARY_RADIUS } from "@/components/park/parkRing";
 /**
  * The park's times of day.
  *
@@ -23,6 +24,31 @@ export type SkyTheme = "sunset" | "sunrise" | "dark";
 
 /** Cycle order for the theme button. */
 export const SKY_THEME_ORDER: SkyTheme[] = ["sunset", "sunrise", "dark"];
+
+/**
+ * HOW FAR THE HAZE REACHES — measured from the park, not typed.
+ *
+ * The three themes have always shared one pair of fog distances; only the
+ * COLOUR differs between them, because the depth the haze gives is a property
+ * of the park's size rather than of the time of day. Those distances were
+ * 1400 and 8000, and they were right for the park that existed when they were
+ * chosen.
+ *
+ * The park has since been rebuilt twice and is now 2.2 km across, so a haze
+ * beginning at 1400 m began well inside it: from the opening shot the far side
+ * of the ring sat under about a third of full fog and washed out. Deriving the
+ * near distance from the boundary keeps the original intent — the park itself
+ * is clear, the distance beyond it has real depth, and at the furthest the
+ * camera can orbit the far side reads at about a fifth of full haze — and it
+ * keeps holding it if the park is ever resized again.
+ *
+ * The ratio between the two is the one the park was tuned at, so the falloff
+ * is the same curve stretched over a longer distance rather than a new one.
+ */
+const FOG_NEAR_FROM_BOUNDARY = 1.6;
+const FOG_FALLOFF_RATIO = 8000 / 1400;
+export const FOG_NEAR = BOUNDARY_RADIUS * FOG_NEAR_FROM_BOUNDARY;
+export const FOG_FAR = FOG_NEAR * FOG_FALLOFF_RATIO;
 
 export interface SkyThemeConfig {
   label: string;
@@ -53,7 +79,7 @@ export const SKY_THEMES: Record<SkyTheme, SkyThemeConfig> = {
   sunset: {
     label: "Sunset",
     background: "#6a4a5e",
-    fog: { color: "#6a4a5e", near: 1400, far: 8000 },
+    fog: { color: "#6a4a5e", near: FOG_NEAR, far: FOG_FAR },
     dome: { horizon: "#ff8a45", mid: "#a84f78", zenith: "#2f3363", glow: "#ff6a2a" },
     stars: false,
     orb: { position: [-2100, 420, -1500], core: "#ffd9a0", halo: "#ff9a4a", haloOpacity: 0.3 },
@@ -74,7 +100,7 @@ export const SKY_THEMES: Record<SkyTheme, SkyThemeConfig> = {
   sunrise: {
     label: "Sunrise",
     background: "#7a6a86",
-    fog: { color: "#7a6a86", near: 1400, far: 8000 },
+    fog: { color: "#7a6a86", near: FOG_NEAR, far: FOG_FAR },
     dome: { horizon: "#ffc46b", mid: "#ef8fa6", zenith: "#3f66a8", glow: "#ffb256" },
     stars: false,
     orb: { position: [2200, 380, -1400], core: "#fff0c4", halo: "#ffc06a", haloOpacity: 0.28 },
@@ -98,7 +124,7 @@ export const SKY_THEMES: Record<SkyTheme, SkyThemeConfig> = {
   dark: {
     label: "Dark",
     background: "#05070f",
-    fog: { color: "#0a1020", near: 1400, far: 8000 },
+    fog: { color: "#0a1020", near: FOG_NEAR, far: FOG_FAR },
     dome: { horizon: "#16233d", mid: "#0a1024", zenith: "#03040b", glow: "#3d4f7a" },
     stars: true,
     orb: { position: [-2100, 1250, -1500], core: "#e8f1ff", halo: "#9db6e8", haloOpacity: 0.16 },

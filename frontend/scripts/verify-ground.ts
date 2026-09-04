@@ -1,9 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
+import {
+  PARK_ORIGIN,
+  RIDE_SLOT_BEARING,
+  RING_RIDE_REACH,
+  type RingRideId,
+} from "../src/components/park/parkRing";
+import {
+  ORBIT_MAX_DISTANCE,
+  ORBIT_MIN_DISTANCE,
+} from "../src/components/world/cameraPlaces";
 import { join } from "node:path";
-import { MAIN_VIEWPOINT, PARK_CENTER, PARK_LAYOUT } from "../src/components/park/layout";
-import { PATH_NODES } from "../src/components/world/paths";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
+import { PARK_LAYOUT } from "../src/components/park/layout";
+import { RIDE_PLOTS, type RidePlot } from "../src/components/world/paths";
 import { SKY_THEMES } from "../src/components/world/skyThemes";
 import { GRASS_TILE_METRES } from "../src/components/world/grassTexture";
 import {
@@ -53,8 +61,25 @@ check(
 );
 const FOG_NEAR = NIGHT.fog.near;
 const FOG_FAR = NIGHT.fog.far;
-const MAX_DISTANCE = num(scene, /maxDistance=\{(\d+)\}/, "maxDistance");
-const MIN_DISTANCE = num(scene, /minDistance=\{(\d+)\}/, "minDistance");
+/*
+ * THE ORBIT LIMITS ARE READ, NOT SCRAPED.
+ *
+ * They used to be pulled out of the scene's JSX with a regexp for a literal
+ * number, which worked while they WERE literals. The far limit is now solved
+ * from the overview viewpoint — the park grew, the opening shot stepped back
+ * past the old fixed 1800, and a limit shorter than the shot it has to hold
+ * snapped the framing inward on the first drag — so the numbers live in
+ * `cameraPlaces.ts` and are imported here. The check that the scene actually
+ * uses them is below, and is worth more than a scraped literal was: it proves
+ * the two cannot drift apart at all, rather than that they happened to agree.
+ */
+const MAX_DISTANCE = ORBIT_MAX_DISTANCE;
+const MIN_DISTANCE = ORBIT_MIN_DISTANCE;
+check(
+  "the scene takes its orbit limits from the solved camera places",
+  /minDistance=\{ORBIT_MIN_DISTANCE\}/.test(scene) && /maxDistance=\{ORBIT_MAX_DISTANCE\}/.test(scene),
+  `orbit ${MIN_DISTANCE.toFixed(0)}-${MAX_DISTANCE.toFixed(0)}u, solved from the overview`,
+);
 const CAM_FAR = num(scene, /far: (\d+)/, "camera far");
 const FOV = num(scene, /DEFAULT_FOV = (\d+)/, "fov");
 
@@ -66,11 +91,7 @@ for (const r of PARK_LAYOUT) {
   xs.push(r.minX, r.maxX);
   zs.push(r.minZ, r.maxZ);
 }
-for (let i = 0; i < 2000; i++) {
-  const p = TRACK_CURVE.getPointAt(i / 2000);
-  xs.push(p.x * TRAIN_SCALE);
-  zs.push(p.z * TRAIN_SCALE);
-}
+/* The railway used to be sampled here to bound the park; it has been removed. */
 
 // The entrance, the ground employees walk in across, and the food court.
 xs.push(GATE_X - GATE_OPENING, GATE_X + GATE_OPENING);
@@ -316,59 +337,76 @@ check(
  * walking route cannot quietly put the ground back under the machinery.
  */
 {
-  let worstGap = Infinity;
-  let worstPair = "";
-  for (const n of PATH_NODES) {
-    for (const r of PARK_LAYOUT) {
-      const reach = Math.max(r.halfX, r.halfZ);
-      const gap = Math.hypot(n.at[0] - r.center[0], n.at[1] - r.center[1]) - n.radius - reach;
-      if (gap < worstGap) {
-        worstGap = gap;
-        worstPair = `${r.label} vs the apron at (${n.at.map((v) => v.toFixed(0)).join(", ")})`;
-      }
-    }
-  }
+  /*
+   * THIS CHECK HAS BEEN TURNED INSIDE OUT, DELIBERATELY.
+   *
+   * It used to require that no paved surface reached under any ride: the
+   * waiting aprons had grown until two of them ran 24 m INSIDE the ride they
+   * served, and the Monster Ride's cups swung out over paving and appeared to
+   * pass through the ground.
+   *
+   * The plan now says the opposite, in as many words: "every radial path must
+   * reach the corresponding ride entrance/platform clearly and completely; do
+   * not stop the paths before reaching the rides". Every attraction stands in
+   * the middle of an identical paved PLATFORM, and the surface runs unbroken
+   * from the food court, down the radial, across the platform to the boarding
+   * steps. Paving under a ride is the design, not a defect.
+   *
+   * What the old check was really protecting is still protected, and is now
+   * checked where it belongs: paving must not reach under a ride it does NOT
+   * serve. That is measured in `verify-park-structure.ts` ("no path crosses a
+   * ride it does not serve"). What is asserted here is the positive form —
+   * every ride really is standing on its own platform, centred on it, with the
+   * same margin of platform showing all round.
+   */
+  const offPlatform = PARK_LAYOUT.filter((r) => {
+    const plot = RIDE_PLOTS.find((p: RidePlot) => p.id === r.id);
+    if (!plot) return true;
+    const off = Math.hypot(r.center[0] - plot.center[0], r.center[1] - plot.center[1]);
+    /* Measured with the plan's own envelope rule — a square footprint was
+       declared from a swept radius, so its circle is that radius and not its
+       diagonal. Using the diagonal here would report the Monster Ride as
+       overhanging a platform it fits inside with twelve metres to spare. */
+    return off > 1e-9 || RING_RIDE_REACH[r.id as RingRideId] > plot.radius;
+  });
   check(
-    "no paved apron reaches under a ride — every ride stands on open grass",
-    worstGap > 0,
-    `tightest is ${worstPair}: ${worstGap.toFixed(1)}u of clear ground between the paving and the ride`,
+    "every ride stands centred on its own paved platform, inside it",
+    offPlatform.length === 0,
+    offPlatform.length
+      ? offPlatform.map((r) => r.label).join(", ")
+      : `${RIDE_PLOTS.length} platforms of ${(RIDE_PLOTS[0].radius * 2).toFixed(0)}u, one ride centred on each`,
   );
 }
 
 /*
- * THE RIDES HAVE MOVED, AND THIS CHECK NOW SAYS WHAT SURVIVED THE MOVE.
+ * THE RIDES HAVE MOVED AGAIN, AND THIS CHECK SAYS WHAT SURVIVED THE MOVE.
  *
- * It used to hold five frozen coordinates, because for a long stretch of this
- * park's life the standing instruction was that no ride ever moves. That
- * instruction has been superseded by a direct one — every ride is to be the
- * same size — and rides the same size need room: the Monster Ride's footprint
- * doubled, the Roller Coaster's is 271 m across, and the layout solver
- * re-placed all five to fit them with clear sky between their silhouettes.
+ * It began as five frozen coordinates, from the stretch of this park's life
+ * when no ride ever moved. When "every ride is to be the same size" superseded
+ * that, the coordinates went and what they were protecting stayed: the FAN —
+ * from the main gate the five read left to right in their designed order, with
+ * no two overlapping.
  *
- * What must still hold is the FAN, which is what those coordinates were really
- * protecting: from the main gate the five rides still read left to right in
- * their designed order, Ferris Wheel, Dragon Ride, Roller Coaster, Monster
- * Ride, UFO Pendulum, and no two of them overlap on the ground. The centres
- * are printed rather than asserted, so a change to them is visible in the log
- * instead of frozen into it.
+ * The park is concentric now, and a ring has no left-to-right order to keep:
+ * the attractions run all the way round the lake. What both earlier versions
+ * were protecting is that the plan is DELIBERATE — every ride in a known slot
+ * rather than wherever a solver left it — so that is what is asserted, in the
+ * terms the plan now has. The centres are printed rather than frozen.
  */
 {
-  const FAN_ORDER = ["ferris", "dragon", "coaster", "monster", "ufo"];
-  const ax = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
-  const az = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
-  const al = Math.hypot(ax, az) || 1;
-  const bearingOf = (c: readonly [number, number]) => {
-    const dx = c[0] - MAIN_VIEWPOINT[0];
-    const dz = c[1] - MAIN_VIEWPOINT[1];
-    return Math.atan2((ax / al) * dz - (az / al) * dx, dx * (ax / al) + dz * (az / al));
-  };
-  const seen = [...PARK_LAYOUT]
-    .sort((a, b) => bearingOf(a.center) - bearingOf(b.center))
-    .map((r) => r.id);
+  const offSlot = PARK_LAYOUT.filter((r) => {
+    const dx = r.center[0] - PARK_ORIGIN[0];
+    const dz = r.center[1] - PARK_ORIGIN[1];
+    const bearing = (Math.atan2(dx, dz) * 180) / Math.PI;
+    return Math.abs(bearing - RIDE_SLOT_BEARING[r.id as RingRideId]) > 1e-6;
+  });
   check(
-    "the five rides still read left to right in the order the fan was designed in",
-    seen.join(",") === FAN_ORDER.join(","),
-    PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
+    "the five department rides each stand on their declared slot on the ring",
+    offSlot.length === 0,
+    PARK_LAYOUT.map(
+      (r) =>
+        `${r.label} ${RIDE_SLOT_BEARING[r.id as RingRideId]}deg (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`,
+    ).join(", "),
   );
 }
 

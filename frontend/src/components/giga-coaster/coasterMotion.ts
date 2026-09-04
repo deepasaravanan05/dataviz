@@ -234,6 +234,30 @@ export function trainStateAt(seconds: number): {
   };
 }
 
+/**
+ * WHERE THE TRAIN IS `seconds` AFTER THE BRAKES CAME OFF.
+ *
+ * The circuit, and nothing but the circuit: the chain, the drop, the trim and
+ * the brake run, wrapped at the length of the run so that the train is back on
+ * its station mark at `RUN_SECONDS` exactly as it was at zero.
+ *
+ * THIS IS THE FUNCTION THE PARK'S RIDE OPERATIONS USE, and `trainStateAt`
+ * above is not. The difference is what happens between circuits. `trainStateAt`
+ * carries this ride's own LOAD and UNLOAD dwell, which is right for an
+ * attraction that simply runs; the Giga Coaster is a department ride now, and
+ * how long it stands in its station is decided by the employees walking up to
+ * it — `rideOps.ts` stops it for each arrival, holds it while they climb in,
+ * and releases it. Carrying a dwell of its own on top of that would have the
+ * train standing still in the middle of somebody's ride.
+ *
+ * The drawn train and the simulated seats both read this one function, so they
+ * cannot disagree about where a car is.
+ */
+export function runDistanceAt(seconds: number): number {
+  const t = ((seconds % RUN_SECONDS) + RUN_SECONDS) % RUN_SECONDS;
+  return sampleAt(t).distance;
+}
+
 /* ------------------------------------------------------------------ *
  * WHAT THE RUN CAME OUT AT — results, not settings
  * ------------------------------------------------------------------ */

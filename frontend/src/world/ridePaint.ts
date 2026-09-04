@@ -54,8 +54,11 @@ export const RIDE_PAINT = {
   dragon: { light: "#d93a2f", mid: "#ad2a21", dark: "#821e17" },
   /** Monster Ride — green, matching its green/teal LED run. */
   monster: { light: "#2fa35e", mid: "#237e48", dark: "#186033" },
-  /** Park Train — amber, held clear of the Dragon's red on the hue wheel. */
-  train: { light: "#e0a01e", mid: "#b57d15", dark: "#8a5d0f" },
+  /*
+   * The Park Train had an entry here — amber, held clear of the Dragon's red
+   * on the hue wheel. The train and its track have been removed from the park,
+   * so the paint has gone with them rather than being left for nothing to read.
+   */
 } as const satisfies Record<string, RidePaint>;
 
 export type PaintedRideId = keyof typeof RIDE_PAINT;

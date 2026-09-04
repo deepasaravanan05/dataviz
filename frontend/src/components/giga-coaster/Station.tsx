@@ -8,10 +8,8 @@ import {
   PLATFORM_THICKNESS,
   PLATFORM_WIDTH,
   RAIL_HEIGHT,
-  TRACK_GAUGE,
 } from "./constants";
-import { PLATFORM_Y } from "./station";
-import { STATION_DISTANCE } from "./trackCurve";
+import { PLATFORM_DISTANCE, PLATFORM_OFFSET, PLATFORM_Y, stationFlight } from "./station";
 import { frameAtDistance } from "./trackFrames";
 import { MATERIAL } from "./parts";
 import { STAIR_GOING, STAIR_RISE, STAIR_WIDTH } from "@/simulation/journey/boardingStair";
@@ -30,12 +28,23 @@ import { STAIR_GOING, STAIR_RISE, STAIR_WIDTH } from "@/simulation/journey/board
  * the park rather than inventing a rise of its own.
  */
 export function Station() {
-  const frame = useMemo(() => frameAtDistance(STATION_DISTANCE + PLATFORM_HALF_LENGTH * 0.2), []);
+  /* Pinned on the middle of the train standing in it — see `station.ts`. */
+  const frame = useMemo(() => frameAtDistance(PLATFORM_DISTANCE), []);
 
-  const steps = Math.max(1, Math.round(PLATFORM_Y / STAIR_RISE));
-  const rise = PLATFORM_Y / steps;
+  /*
+   * The flight is solved in `station.ts`, because the journey walks employees
+   * up these same steps — the ride is a department ride now — and one rule
+   * with two readers is the only way the drawn treads and the walked path can
+   * be guaranteed to be the same treads.
+   */
+  const flight = useMemo(
+    () => stationFlight(STAIR_RISE, STAIR_GOING, STAIR_WIDTH),
+    [],
+  );
+  const steps = flight.steps;
+  const rise = flight.stepRise;
   /* The platform stands on the right of the track, clear of the cars. */
-  const offset = TRACK_GAUGE / 2 + PLATFORM_WIDTH / 2 + 0.6;
+  const offset = PLATFORM_OFFSET;
 
   return (
     <group
@@ -119,9 +128,9 @@ export function Station() {
           <mesh
             key={i}
             position={[
-              offset + PLATFORM_WIDTH / 2 + 0.4 + (steps - i - 0.5) * STAIR_GOING,
+              flight.headX + (steps - i - 0.5) * STAIR_GOING,
               (i + 1) * rise - tread / 2,
-              PLATFORM_HALF_LENGTH - STAIR_WIDTH,
+              flight.z,
             ]}
             receiveShadow
           >

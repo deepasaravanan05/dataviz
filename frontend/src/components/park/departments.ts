@@ -9,27 +9,35 @@ import { DATASET_DEPARTMENTS } from "@/simulation/journey/dataset";
  * out of the shared park layout, so it can never drift from what the ride is
  * actually called elsewhere in the project.
  *
- * The dataset has SIX departments but the park has five rides, and the user's
- * standing instruction is that employees whose department has no ride of its
- * own are converted to one of the EXISTING rides — never to a new destination.
- * So the four departments with a ride each keep it, and UI/UX shares the
- * Ferris Wheel with IT Support.
+ * The dataset has THIRTEEN departments and the park has five department rides,
+ * and the user's standing instruction is that employees whose department has no
+ * ride of its own are converted to one of the EXISTING rides — never to a new
+ * destination. So every department below lands on one of the five attractions
+ * that are already in the park, and several of them share.
  *
  * WHAT THE SIGNS SAY IS A SEPARATE QUESTION. The user gave the park its own
  * names for two of the rides — the Roller Coaster is "Testing" and the Ferris
  * Wheel is "Developers" — and those live in RIDE_SIGN_NAME below. They are
  * DISPLAY names only. The mapping here, the dataset rows, and every place a
- * PERSON's own department is shown are untouched, so Tech people still ride
- * the Roller Coaster and still read as Tech in the employee panel, the food
- * court list and the dashboard table.
+ * PERSON's own department is shown are untouched, so a "testing" employee
+ * rides the Roller Coaster and still reads as "testing" in the employee panel,
+ * the food court list and the dashboard table.
  *
  * No ride is added, removed, moved or resized to fit a department. If a future
- * roster brings a seventh department it joins an existing ride here, and
+ * roster brings a fourteenth department it joins an existing ride here, and
  * nothing in the park changes.
  */
 
-/** The ids the park layout already uses for its five attractions. */
-export type DepartmentRideId = "coaster" | "dragon" | "ferris" | "ufo" | "monster";
+/**
+ * The ids the park layout uses for the attractions employees are routed to.
+ *
+ * The Giga Coaster joined them at the user's word — "the devops employees only
+ * go and sit on the giga coaster ride". It was already standing on its own ring
+ * slot as an attraction nobody boarded; it did not move, resize or change to
+ * take the department. What it gained is a place in `PARK_LAYOUT`, seat poses,
+ * a boarding stair and the stop-load-run-unload schedule the other five have.
+ */
+export type DepartmentRideId = "coaster" | "dragon" | "ferris" | "ufo" | "monster" | "giga";
 
 /** One department, spelled exactly as the dataset spells it. */
 export interface DepartmentInfo {
@@ -38,13 +46,62 @@ export interface DepartmentInfo {
   rideName: string;
 }
 
+/**
+ * WHERE EACH DEPARTMENT RIDES. Written out, never shuffled.
+ *
+ * NO RIDE ASSIGNMENT WAS CHANGED to make this table. It is the mapping the park
+ * already had, applied to the workbook's own spelling of the same departments,
+ * plus `resolveDepartmentRides`'s own round-robin for the ones the park had
+ * never heard of — written out rather than computed so that a department's
+ * destination cannot depend on which date happens to be on screen.
+ *
+ * THE SIX THE PARK ALREADY KNEW keep exactly the ride they had. The workbook
+ * writes them in lower case and in short form, and two of them are named by the
+ * ride signs the user chose rather than by the old dataset's wording:
+ *
+ *   dev         -> ferris   the wheel's own sign reads "Developers"
+ *   testing     -> coaster  the coaster's own sign reads "Testing"
+ *   cyber       -> dragon   was "Cyber Security"
+ *   erp         -> monster  was "ERP"
+ *   data        -> ufo      was "Data Engineering"
+ *   it support  -> ferris   was "IT Support"
+ *   design      -> ferris   was "UI/UX", which shared the wheel then too
+ *
+ * DEVOPS WAS GIVEN A RIDE OF ITS OWN — the Giga Coaster, at the user's word.
+ * It is the only department here that was not absorbed into a ride that already
+ * had one, and it took nothing from the park to do it: the Giga Coaster was
+ * already standing on its own ring slot with nobody riding it.
+ *
+ * THE FIVE OTHERS THAT ARE NEW — risk, pm, ml, admin, finance — are absorbed by
+ * the existing attractions in the order they first appear in the workbook,
+ * round-robin through RIDE_ORDER, which is precisely what
+ * `resolveDepartmentRides` below does with a department it does not recognise.
+ * Nothing is renamed, moved or resized to carry them.
+ */
 const DEPARTMENT_MAPPING: Record<string, DepartmentRideId> = {
-  Tech: "coaster",
-  "Cyber Security": "dragon",
-  ERP: "monster",
-  "Data Engineering": "ufo",
-  "IT Support": "ferris",
-  "UI/UX": "ferris",
+  /* The departments the park already served, in the workbook's spelling. */
+  dev: "ferris",
+  testing: "coaster",
+  cyber: "dragon",
+  erp: "monster",
+  data: "ufo",
+  "it support": "ferris",
+  design: "ferris",
+
+  /*
+   * DEVOPS RIDES THE GIGA COASTER. Asked for by name — "the giga coaster is
+   * for devops team", and confirmed as real boarding rather than a signboard:
+   * "the devops employees only go and sit on the giga coaster ride". It is the
+   * one department here that was given its ride rather than absorbed into one.
+   */
+  devops: "giga",
+
+  /* New departments, absorbed by existing rides in first-seen order. */
+  risk: "dragon",
+  pm: "ferris",
+  ml: "ufo",
+  admin: "monster",
+  finance: "coaster",
 };
 
 /** Every department, in the dataset's own order. */
@@ -64,10 +121,11 @@ export function rideForDepartment(department: string): DepartmentInfo {
  * Rides that announce a name of the user's choosing rather than the department
  * names underneath them.
  *
- * The Roller Coaster serves Tech and is signed "Testing"; the Ferris Wheel
- * serves IT Support and UI/UX and is signed "Developers" instead of joining
- * both. The other three already carry their department's own name, so they are
- * absent here and fall through to the join below.
+ * The Roller Coaster is signed "Testing" and the Ferris Wheel "Developers" —
+ * the names the user gave them — and both now serve the workbook department of
+ * that name as well as the others sharing the ride. The other three carry their
+ * departments' own names, so they are absent here and fall through to the join
+ * below.
  *
  * Nothing that counts, colours, seats or routes an employee reads this map, so
  * a ride's roster, its queue and its arithmetic are identical either way.
@@ -102,7 +160,23 @@ export interface DepartmentRide {
   rideName: string;
 }
 
-export const RIDE_ORDER: DepartmentRideId[] = ["coaster", "dragon", "ferris", "ufo", "monster"];
+/**
+ * The routing destinations, in the order the park has always listed them, with
+ * the Giga Coaster appended.
+ *
+ * APPENDED RATHER THAN INSERTED, deliberately. This order is what
+ * `resolveDepartmentRides` deals unknown departments round-robin from, so
+ * putting the new id anywhere but the end would silently re-home departments
+ * that already have a ride.
+ */
+export const RIDE_ORDER: DepartmentRideId[] = [
+  "coaster",
+  "dragon",
+  "ferris",
+  "ufo",
+  "monster",
+  "giga",
+];
 
 /**
  * The department → ride mapping for an ARBITRARY roster, e.g. an upload.
@@ -153,7 +227,18 @@ export function departmentFor(rideId: DepartmentRideId): DepartmentRide {
 }
 
 export function validateDepartments(): void {
-  console.assert(DEPARTMENTS.length === 6, `Expected 6 departments, found ${DEPARTMENTS.length}`);
+  /* Every department the workbook contains has a destination, and every
+     destination is a ride that was already in the park. The COUNT is the
+     dataset's business, not this module's — it was six and is now thirteen —
+     so what is asserted is the property, not the number. */
+  console.assert(
+    DEPARTMENTS.length === DATASET_DEPARTMENTS.length,
+    `Expected every dataset department to be mapped, found ${DEPARTMENTS.length} of ${DATASET_DEPARTMENTS.length}`,
+  );
+  console.assert(
+    DEPARTMENTS.every((d) => RIDE_ORDER.includes(d.rideId)),
+    "A department is mapped to a ride the park does not have",
+  );
   console.assert(RIDE_DEPARTMENTS.length === 5, `Expected 5 department rides, found ${RIDE_DEPARTMENTS.length}`);
   console.assert(
     RIDE_DEPARTMENTS.every((d) => d.departments.length >= 1),

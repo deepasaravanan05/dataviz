@@ -5,6 +5,10 @@ import { useActiveJourneyStore } from "@/simulation/journey/activeJourney";
 import { SPEED_OPTIONS } from "@/simulation/journey/clock";
 import { formatSimTime } from "@/simulation/clock";
 import { useJourneyStore } from "@/store/journeyStore";
+import {
+  SIMULATION_DAY_OF_DATE,
+  useEmployeeDataStore,
+} from "@/store/employeeDataStore";
 
 /**
  * Play, pause, scrub and speed for the simulated morning.
@@ -32,6 +36,10 @@ export function TimelineControls() {
   const setSpeed = useJourneyStore((s) => s.setSpeed);
   const seek = useJourneyStore((s) => s.seek);
   const reset = useJourneyStore((s) => s.reset);
+  /* The date the roster comes from, or the uploaded file that replaced it. */
+  const date = useEmployeeDataStore((s) => s.date);
+  const fileName = useEmployeeDataStore((s) => (s.rows ? s.fileName : null));
+  const day = SIMULATION_DAY_OF_DATE[date];
 
   /*
    * While the thumb is held, show what the user is dragging rather than what
@@ -68,8 +76,17 @@ export function TimelineControls() {
             </svg>
           </button>
 
-          <div className="min-w-[5.5rem] text-lg font-bold tabular-nums leading-none">
-            {formatSimTime(value)}
+          <div className="min-w-[5.5rem] leading-none">
+            <div className="text-lg font-bold tabular-nums">{formatSimTime(value)}</div>
+            {/*
+              WHICH DAY THIS IS. The workbook holds 49 of them and the park
+              animates one at a time, so the clock alone is ambiguous — the
+              date the figures come from belongs beside it. Picked in the
+              entrance calendar; an upload replaces the date with the file.
+            */}
+            <div className="mt-0.5 text-[10px] font-semibold tabular-nums text-white/45">
+              {fileName ?? `${day ? `${day} ` : ""}${date}`}
+            </div>
           </div>
 
           <div className="ml-auto flex gap-1" role="group" aria-label="Playback speed">

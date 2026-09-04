@@ -20,11 +20,8 @@ import {
   VEHICLE_TOP_Y,
 } from "@/components/dumbo-ride/constants";
 import { CYCLE_SECONDS } from "@/components/dumbo-ride/motion";
-import {
-  BEHIND_DISTANCE,
-  FAN_ANGLE_DEG,
-  RIDE_CENTER,
-} from "@/components/dumbo-ride/placement";
+import { RIDE_CENTER } from "@/components/dumbo-ride/placement";
+import { RIDE_SLOT_BEARING, ringRadiusOf } from "@/components/park/parkRing";
 import { STATION_FLIGHTS, STATION_STEPS } from "@/components/dumbo-ride/station";
 
 /** Framed from the gate side, where the stair up to the gallery is. */
@@ -72,8 +69,8 @@ export default function DumboRidePage() {
             {STATION_FLIGHTS.length} flights &mdash; every {CYCLE_SECONDS}s
           </div>
           <div>
-            Standing {BEHIND_DISTANCE.toFixed(0)}m behind the UFO Pendulum, which is the Data
-            Engineering ride, {FAN_ANGLE_DEG}&deg; off the gate&rsquo;s line of sight through it
+            On the park ring, {ringRadiusOf("dumbo").toFixed(0)}m out from the lake at a bearing
+            of {Math.abs(RIDE_SLOT_BEARING.dumbo)}&deg; right of the entrance avenue
           </div>
         </div>
         <div className="mt-2 flex items-center gap-1">

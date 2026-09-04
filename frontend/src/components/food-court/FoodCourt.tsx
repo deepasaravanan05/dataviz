@@ -82,7 +82,29 @@ const CUPOLA_R = HALL_R * 0.24;
 const CUPOLA_H = 3.8;
 /** The finial ball on the lantern, which is the highest point of the building. */
 const CUPOLA_BASE = DOME_TOP - 0.4;
-export const PAVILION_TOP = CUPOLA_BASE + CUPOLA_H + CUPOLA_R * 1.5 + CUPOLA_R * 0.3;
+/**
+ * HOW MUCH BIGGER THE BUILDING IS DRAWN THAN IT IS MODELLED.
+ *
+ * The hall was authored at 80 m across and 39 m to the finial, which was right
+ * when it stood on its own beside the entrance avenue. It is now the building
+ * at the middle of a 500 m circular plaza with a 240 m colonnade around it, a
+ * ring of stalls and thirty tables — and at 80 m it read as a garden pavilion
+ * lost in a square.
+ *
+ * So it is drawn half as large again. This is a UNIFORM scale on one group, so
+ * nothing is stretched and nothing needs a counter-scale to undo a distortion —
+ * the objection this file has always raised about the box it replaced does not
+ * apply. Every exported dimension below is multiplied by it, so the numbers
+ * this module publishes are the metres the building actually stands at, which
+ * is the property that mattered about them in the first place.
+ *
+ * It is 1.5 and not more because the stalls ring the hall at 78 m: a bigger
+ * factor would push the veranda out through them.
+ */
+export const PAVILION_SCALE = 1.5;
+
+export const PAVILION_TOP =
+  (CUPOLA_BASE + CUPOLA_H + CUPOLA_R * 1.5 + CUPOLA_R * 0.3) * PAVILION_SCALE;
 
 /**
  * THE WINGS, LENGTHENED.
@@ -103,8 +125,9 @@ const WING_W = 24;
 const WING_D = 26;
 const WING_H = 10.5;
 const WING_X = HALL_FLAT + WING_W / 2 - 0.6;
+
 /** Half the pavilion's full frontage, kiosks and veranda excluded. */
-export const PAVILION_HALF_WIDTH = WING_X + WING_W / 2;
+export const PAVILION_HALF_WIDTH = (WING_X + WING_W / 2) * PAVILION_SCALE;
 
 /** The veranda across the front, and how far it projects onto the terrace. */
 const VERANDA_H = 6.6;
@@ -119,14 +142,24 @@ const VERANDA_Z = HALL_Z + HALL_FLAT;
  * those rather than typed, so the paving always reaches past the building it
  * carries instead of leaving its back corners standing on grass.
  */
-export const PAVILION_BACK = HALL_Z - HALL_R;
-export const PAVILION_FRONT = VERANDA_Z + VERANDA_OUT;
+export const PAVILION_BACK = (HALL_Z - HALL_R) * PAVILION_SCALE;
+export const PAVILION_FRONT = (VERANDA_Z + VERANDA_OUT) * PAVILION_SCALE;
 export const PAVILION_DEPTH = PAVILION_FRONT - PAVILION_BACK;
 
 const TERRACE_MARGIN = 6;
 const TERRACE_HALF_X = PAVILION_HALF_WIDTH + TERRACE_MARGIN;
-/** Forward of the building it must still reach the door marker and the tables. */
-const TERRACE_FRONT = FOOD_COURT_DOOR_LOCAL[1] + 4;
+/**
+ * Forward of the building, the terrace reaches past the veranda and no
+ * further.
+ *
+ * It used to run out to the door marker, which was 22 m in front and the point
+ * employees stepped on to the terrace at. The court is the middle of the park
+ * now and its door is where the central avenue meets the PLAZA, 250 m out — so
+ * a terrace drawn to the door would have been a 500 m rectangle laid across
+ * the circular plaza. The terrace is the pavilion's own apron again, and the
+ * ground between it and the door is the plaza, drawn by `GrandFoodCourt`.
+ */
+const TERRACE_FRONT = PAVILION_FRONT + TERRACE_MARGIN;
 const TERRACE_BACK = PAVILION_BACK - TERRACE_MARGIN;
 
 /** Where the three serving kiosks stand, and how wide each one is. */
@@ -509,28 +542,36 @@ export function FoodCourt() {
         <meshStandardMaterial color={TERRACE} roughness={0.97} />
       </mesh>
 
-      {/* The pavilion: domed hall, two arcaded wings, veranda across the front. */}
-      <Wing side={-1} />
-      <Wing side={1} />
-      <DomedHall />
-      <Veranda />
+      {/*
+        The pavilion, and everything that is part of the building: the domed
+        hall, its wings, the veranda, the sign on its fascia and the three
+        serving kiosks under it. All inside ONE uniform scale group, so the
+        building grows as a building — no axis is favoured and the lettering
+        needs no correction.
+      */}
+      <group scale={PAVILION_SCALE}>
+        <Wing side={-1} />
+        <Wing side={1} />
+        <DomedHall />
+        <Veranda />
 
-      {/* The name, on the veranda fascia — drawn at its true size, undistorted. */}
-      <Text
-        position={[0, VERANDA_H - 0.75, VERANDA_Z + VERANDA_OUT + 0.22]}
-        fontSize={1.9}
-        color="#fff6e6"
-        anchorX="center"
-        anchorY="middle"
-        letterSpacing={0.08}
-      >
-        FOOD COURT
-      </Text>
+        {/* The name, on the veranda fascia — drawn at its true size, undistorted. */}
+        <Text
+          position={[0, VERANDA_H - 0.75, VERANDA_Z + VERANDA_OUT + 0.22]}
+          fontSize={1.9}
+          color="#fff6e6"
+          anchorX="center"
+          anchorY="middle"
+          letterSpacing={0.08}
+        >
+          FOOD COURT
+        </Text>
 
-      {/* Serving kiosks */}
-      <Counter x={COUNTER_XS[0]} label="COFFEE" color="#3f8a70" />
-      <Counter x={COUNTER_XS[1]} label="BREAKFAST" color="#c9503f" />
-      <Counter x={COUNTER_XS[2]} label="SNACKS" color="#e0a52c" />
+        {/* Serving kiosks */}
+        <Counter x={COUNTER_XS[0]} label="COFFEE" color="#3f8a70" />
+        <Counter x={COUNTER_XS[1]} label="BREAKFAST" color="#c9503f" />
+        <Counter x={COUNTER_XS[2]} label="SNACKS" color="#e0a52c" />
+      </group>
 
       {/* Seating terrace: five tables of four — the court's twenty seats. */}
       {FOOD_COURT_TABLES.map(([x, z], i) => (
@@ -538,13 +579,18 @@ export function FoodCourt() {
       ))}
 
       {/* Terrace edge, planting, lighting and bins. */}
-      <Railing position={[0, 0, 20]} length={30} />
+      {/*
+        The furniture around the building stays at HUMAN size and moves out
+        with the walls — the props are for people, and a bench scaled with the
+        architecture is a bench nobody can sit on.
+      */}
+      <Railing position={[0, 0, 20 * PAVILION_SCALE]} length={30 * PAVILION_SCALE} />
       {[-1, 1].map((s) => (
         <group key={s}>
-          <LampPost position={[s * 15, 0, 6]} />
-          <Planter position={[s * 15, 0, 16]} w={4} d={2.2} />
-          <Bench position={[s * 12, 0, 19]} rotation={Math.PI} />
-          <Bin position={[s * 9.5, 0, 19.4]} />
+          <LampPost position={[s * 15 * PAVILION_SCALE, 0, 6 * PAVILION_SCALE]} />
+          <Planter position={[s * 15 * PAVILION_SCALE, 0, 16 * PAVILION_SCALE]} w={4} d={2.2} />
+          <Bench position={[s * 12 * PAVILION_SCALE, 0, 19 * PAVILION_SCALE]} rotation={Math.PI} />
+          <Bin position={[s * 9.5 * PAVILION_SCALE, 0, 19.4 * PAVILION_SCALE]} />
         </group>
       ))}
 

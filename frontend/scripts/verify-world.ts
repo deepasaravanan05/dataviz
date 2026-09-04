@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
+import { PARK_ORIGIN, PARK_PAVED_EDGE } from "../src/components/park/parkRing";
 import { join } from "node:path";
 import { EMPLOYEE_HEIGHT, HUMAN, LOD_MID, LOD_NEAR, PROP, SIGN } from "../src/world/scale";
 import { PARK_LAYOUT, PLAZA_CENTER, rideById } from "../src/components/park/layout";
 import { UNIFORM_RIDE_HEIGHT } from "../src/components/park/uniformRideHeight";
 import { CAMERA_PLACES, UNREACHABLE_RIDES } from "../src/components/world/cameraPlaces";
-import { TRAIN_TEAM_ID } from "../src/components/park/trainTeam";
 import {
   CHAIRS_TEAM_ID,
   OVERALL_REACH as CHAIRS_REACH,
-  RIDE_CENTER as CHAIRS_CENTER,
 } from "../src/components/flying-chairs/constants";
+import {RIDE_CENTER as CHAIRS_CENTER} from "../src/components/flying-chairs/placement";
 import {
   LOOPER_RIDE_ID,
   OVERALL_REACH as LOOPER_REACH,
@@ -25,8 +25,12 @@ import {
   OVERALL_REACH as DUMBO_REACH,
 } from "../src/components/dumbo-ride/constants";
 import { RIDE_CENTER as DUMBO_CENTER } from "../src/components/dumbo-ride/placement";
-import { TRACK_CENTER } from "../src/components/park-train/constants";
-import { PATH_LINKS, PATH_NODES, distanceToPaving } from "../src/components/world/paths";
+import {
+  PATH_LINKS,
+  PATH_NODES,
+  PATH_RINGS,
+  distanceToPaving,
+} from "../src/components/world/paths";
 import { BOUNDARY_TREES, PARK_SHRUBS, PARK_TREES } from "../src/components/world/planting";
 import { RIDE_SIGNS } from "../src/components/park/rideSigns";
 import { JOURNEY_EMPLOYEES, sampleJourney } from "../src/simulation/journey/journey";
@@ -44,8 +48,6 @@ import {
   WALK_UNITS_PER_MINUTE,
 } from "../src/simulation/journey/constants";
 import { SPEED_OPTIONS } from "../src/simulation/journey/clock";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
 import { OVERALL_REACH as UFO_REACH } from "../src/components/ufo-pendulum/constants";
 import { RIDE_CENTER as UFO_CENTER } from "../src/components/ufo-pendulum/placement";
 
@@ -295,21 +297,20 @@ check(
   "the rigged body is held at a readable pixel height at every distance; the dot that used to stand in for it is gone",
 );
 
+
 // ================= 4. The empty plane is filled =================
-const trackPts: [number, number][] = [];
-for (let i = 0; i <= 600; i++) {
-  const p = TRACK_CURVE.getPointAt(i / 600);
-  trackPts.push([p.x * TRAIN_SCALE, p.z * TRAIN_SCALE]);
-}
 const xs: number[] = [];
 const zs: number[] = [];
 for (const r of PARK_LAYOUT) {
   xs.push(r.minX, r.maxX);
   zs.push(r.minZ, r.maxZ);
 }
-for (const [x, z] of trackPts) {
-  xs.push(x);
-  zs.push(z);
+/* The railway used to bound this; it is gone, so the park's own paved extent
+   does instead. */
+for (let i = 0; i < 64; i++) {
+  const a = (i / 64) * Math.PI * 2;
+  xs.push(PARK_ORIGIN[0] + Math.cos(a) * PARK_PAVED_EDGE);
+  zs.push(PARK_ORIGIN[1] + Math.sin(a) * PARK_PAVED_EDGE);
 }
 const minX = Math.min(...xs);
 const maxX = Math.max(...xs);
@@ -413,21 +414,15 @@ check(
 );
 
 // ================= 5. Nothing is planted where it must not be =================
-function trackDistance(x: number, z: number) {
-  let m = Infinity;
-  for (const [px, pz] of trackPts) m = Math.min(m, Math.hypot(x - px, z - pz));
-  return m;
-}
 let onPath = 0;
 let inRide = 0;
-let onRails = 0;
 let inBuilding = 0;
+
 for (const t of PARK_TREES) {
   if (distanceToPaving(t.x, t.z) < 0) onPath++;
   for (const r of PARK_LAYOUT) {
     if (t.x > r.minX && t.x < r.maxX && t.z > r.minZ && t.z < r.maxZ) inRide++;
   }
-  if (trackDistance(t.x, t.z) < 4) onRails++;
   if (
     Math.abs(t.x - FOOD_COURT_CENTER[0]) < FOOD_COURT_HALF &&
     Math.abs(t.z - FOOD_COURT_CENTER[1]) < FOOD_COURT_HALF
@@ -437,7 +432,7 @@ for (const t of PARK_TREES) {
 }
 check("no tree stands on a path", onPath === 0, `${PARK_TREES.length} checked`);
 check("no tree stands inside a ride", inRide === 0, `${PARK_LAYOUT.length} footprints checked`);
-check("no tree stands on the railway", onRails === 0, "the train's loop is clear");
+/* "No tree stands on the railway" used to be checked here; the railway is gone. */
 check("no tree stands inside the food court", inBuilding === 0, "the terrace is clear");
 check(
   "no tree blocks a department sign",
@@ -470,10 +465,28 @@ check(
     ? "every sampled step is on paving"
     : `worst stray ${worstOff.toFixed(1)} m off the paved edge (${worstWho}) — inside the lane spread`,
 );
+/*
+ * THE NETWORK IS DERIVED, and what it is derived FROM has changed.
+ *
+ * It used to be laid along the employees' own routes: the file read
+ * `rideAnchor` and put paving under wherever the crowd happened to walk. That
+ * was the right rule for a park whose paths existed to serve the simulation.
+ *
+ * The plan now runs the other way round. The paths are the MASTER PLAN — a
+ * circular path round the food court, one equal radial per ride, an outer path
+ * joining the platforms — and the employees walk on them. So `paths.ts` reads
+ * the structure module instead, and what is worth asserting is that it still
+ * derives its geometry rather than typing it: every circle, radial and
+ * platform in the network comes from `parkRing.ts`.
+ */
 check(
-  "the network is laid from the routes themselves",
-  /rideAnchor/.test(read("src", "components", "world", "paths.ts")),
-  `${PATH_LINKS.length} links and ${PATH_NODES.length} junctions, all derived from where people go`,
+  "the network is laid from the park's own plan",
+  /from "@\/components\/park\/parkRing"/.test(read("src", "components", "world", "paths.ts")) &&
+    !/\[\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*\]\s*,\s*\[/.test(
+      read("src", "components", "world", "paths.ts").replace(/\/\*[\s\S]*?\*\//g, ""),
+    ),
+  `${PATH_LINKS.length} links, ${PATH_NODES.length} junctions and ${PATH_RINGS.length} circles, ` +
+    `all solved from the plan`,
 );
 check(
   "the promenade is wide enough for a workforce",
@@ -518,27 +531,20 @@ for (const p of CAMERA_PLACES) {
 check("no viewpoint is inside a ride", insideSomething === "", insideSomething || "all clear");
 check("no viewpoint is underground", underground === "", underground || "all above ground");
 /*
- * The Park Train rides with the department chips but is not a department ride
- * — it carries the DevOps team's NAME and has no layout footprint, so its
- * subject is the rail loop's centre rather than a ride's box. Same property,
- * read from the module that owns the subject.
+ * The chips that carry a TEAM name rather than a department own their own
+ * subject. The Park Train used to be one of them — its subject was the rail
+ * loop's centre, because it had no layout footprint — and it has been removed
+ * from the park along with its track and its route.
  */
-const TRAIN_LOOP_CENTER: [number, number] = [
-  TRACK_CENTER[0] * TRAIN_SCALE,
-  TRACK_CENTER[1] * TRAIN_SCALE,
-];
 check(
   "each department viewpoint actually frames its own ride",
   CAMERA_PLACES.filter((p) => p.group === "department").every((p) => {
     /* The chips that carry a TEAM name rather than a department own their own
-       subject: the Park Train's is the rail loop's centre, and the Flying
-       Chairs', the Super Looper's, the Tea Cups' and the Dumbo Ride's are
-       their own solved positions. None of them has a layout footprint to
-       read — they are not rides the solver places. */
+       subject: the Flying Chairs', the Super Looper's, the Tea Cups' and the
+       Dumbo Ride's are their own solved positions. None of them has a layout
+       footprint to read — they are not rides the solver places. */
     const c =
-      p.id === TRAIN_TEAM_ID
-        ? TRAIN_LOOP_CENTER
-        : p.id === CHAIRS_TEAM_ID
+      p.id === CHAIRS_TEAM_ID
           ? CHAIRS_CENTER
           : p.id === LOOPER_RIDE_ID
             ? LOOPER_CENTER
@@ -549,7 +555,7 @@ check(
                 : rideById(p.id).center;
     return Math.hypot(p.lookAt[0] - c[0], p.lookAt[2] - c[1]) < 1e-6;
   }),
-  "look-at points are the ride centres, read from the layout — and the loop centre for the train",
+  "look-at points are the ride centres, read from the modules that own them",
 );
 check(
   "the camera never moves on its own",
@@ -617,7 +623,7 @@ check(
 );
 check(
   "the environment renders outside every ride scale group",
-  /<ParkEnvironment \/>/.test(scene) && !/<group scale=\{(PARK_SCALE|TRAIN_SCALE)\}>\s*<ParkEnvironment/.test(scene),
+  /<ParkEnvironment \/>/.test(scene) && !/<group scale=\{PARK_SCALE\}>\s*<ParkEnvironment/.test(scene),
   "nothing is parented to a ride",
 );
 

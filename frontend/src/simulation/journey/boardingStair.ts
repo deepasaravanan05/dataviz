@@ -1,12 +1,24 @@
 import type { DepartmentRideId } from "@/components/park/departments";
 import { rideById, rideScale } from "@/components/park/layout";
 import {
+  PLATFORM_ALONG as GIGA_PLATFORM_ALONG,
+  PLATFORM_CENTER as GIGA_PLATFORM_CENTER,
+  PLATFORM_OUTWARD as GIGA_PLATFORM_OUTWARD,
+  PLATFORM_Y as GIGA_PLATFORM_Y,
+  stationFlight,
+} from "@/components/giga-coaster/station";
+import {
+  PLATFORM_HALF_LENGTH as GIGA_PLATFORM_HALF_ALONG,
+  PLATFORM_WIDTH as GIGA_PLATFORM_WIDTH,
+} from "@/components/giga-coaster/constants";
+import {
   GONDOLA_HEIGHT as MONSTER_GONDOLA_HEIGHT,
   GONDOLA_RADIUS as MONSTER_GONDOLA_RADIUS,
   SEAT_SURFACE_Y as MONSTER_SEAT_SURFACE_Y,
 } from "@/components/monster-ride/constants";
 import { GATE_X, GATE_Z } from "./constants";
 import {
+  BOARD_REACH,
   DEPARTMENT_RIDE_IDS,
   PLATFORM_SEATS,
   boardingSeats,
@@ -80,6 +92,144 @@ export const STAIR_PITCH = Math.atan2(STAIR_RISE, STAIR_GOING);
 export const MAX_FLIGHT_RISE = 4.5;
 /** Depth of a landing, and the lateral gap between the two switchback lanes. */
 export const LANDING_DEPTH = STAIR_WIDTH;
+
+/**
+ * How many people can climb ABREAST, and where each of them walks.
+ *
+ * An employee must never be held up by another employee — not by a group, not
+ * by a cabin, and not by the person in front of them on the steps. A stair a
+ * shade under three metres wide does not need them to queue: it is three
+ * shoulders across, so three can go up side by side, each in their own lane,
+ * and a fourth follows whoever is furthest up the flight.
+ *
+ * The lanes are derived rather than chosen — as many as fit at a full shoulder
+ * width — and the outermost walker's shoulder still falls inside the handrail:
+ * at three lanes the pitch is 0.99 u against a 0.85 u shoulder, which puts them
+ * 1.42 u from the centre line of a stair that is 1.49 u to the rail.
+ */
+export const CLIMB_LANES = Math.max(
+  1,
+  Math.floor(STAIR_WIDTH / (HUMAN.shoulderWidth * EMPLOYEE_SCALE)),
+);
+
+/** How far across the flight lane `i` walks, measured along `stair.along`. */
+export function climbLaneOffset(index: number): number {
+  const pitch = STAIR_WIDTH / CLIMB_LANES;
+  return (index - (CLIMB_LANES - 1) / 2) * pitch;
+}
+
+/**
+ * The top of the stair in a given lane — where a climber steps onto the deck,
+ * and where somebody going down steps back onto the treads.
+ *
+ * The head has to be the LANE's head rather than one shared point, or two
+ * people setting off down the steps a second apart leave from the same spot and
+ * are inside one another until the lanes have opened out. It is the deck that
+ * lets this be free: a boarding deck is metres deep, so the walk across it ends
+ * wherever on the top step that employee is going to use.
+ *
+ * The FOOT is a lane's own foot for anybody coming DOWN, for the same reason at
+ * the other end — two people who reach the ground a second apart would
+ * otherwise land on the same paving stone. Going up it is the one point they
+ * share: the walk in is solved before the schedule knows which lane will be
+ * free, so everybody arrives at the middle of the bottom step and fans out onto
+ * the treads from there.
+ */
+/**
+ * THE PATH ONE LANE OF A STAIRCASE WALKS, foot to head.
+ *
+ * A lane is the side of the steps somebody keeps to, and a staircase turns, so
+ * the offset has to be measured across the way the stair is GOING at each
+ * point: across the treads on a flight, and across the depth of a landing where
+ * the path runs the other way. Holding it in one fixed direction worked on the
+ * flights and cancelled out on the landings, where two people in different
+ * lanes ended up walking through one another rounding the turn.
+ *
+ * The side is pinned to the staircase and not to the walker — `keep` is a
+ * direction parallel to none of the four the path takes, so a lane is the same
+ * side of the corridor on every flight, going up and coming down alike, and two
+ * people who pass are always on opposite sides of the steps.
+ *
+ * This is the one definition of it: the routes are built from it and
+ * `verify-boarding` measures against it.
+ */
+export function stairLanePath(stair: BoardingStair, lane: number): Point3[] {
+  const across = climbLaneOffset(lane);
+  const keep: [number, number] = [
+    (stair.along[0] + stair.outward[0]) / Math.SQRT2,
+    (stair.along[1] + stair.outward[1]) / Math.SQRT2,
+  ];
+  /*
+   * The side is taken from the nearest LEVEL move — the tread or landing the
+   * point belongs to — looking backwards first and forwards only at the start
+   * of a run. That is what keeps a riser a riser: both ends of it take their
+   * side from the same flight, so the lane never turns a step into a diagonal
+   * through it. Where the stair does turn, the side turns with it, and it turns
+   * across a landing, which is level.
+   */
+  const runs = stair.path.map((_, i) => {
+    if (i === 0) return null;
+    const dx = stair.path[i][0] - stair.path[i - 1][0];
+    const dz = stair.path[i][2] - stair.path[i - 1][2];
+    const len = Math.hypot(dx, dz);
+    return len < 1e-9 ? null : ([dx / len, dz / len] as [number, number]);
+  });
+  const sideOf = (i: number): [number, number] => {
+    let run: [number, number] | null = null;
+    for (let k = i; k >= 1 && !run; k--) run = runs[k];
+    for (let k = i + 1; k < runs.length && !run; k++) run = runs[k];
+    if (!run) return [stair.along[0], stair.along[1]];
+    /* A quarter turn from the way it is going, faced the same way every time. */
+    let px = -run[1];
+    let pz = run[0];
+    if (px * keep[0] + pz * keep[1] < 0) {
+      px = -px;
+      pz = -pz;
+    }
+    return [px, pz];
+  };
+  return stair.path.map((p, i) => {
+    const side = sideOf(i);
+    return [p[0] + side[0] * across, p[1], p[2] + side[1] * across] as Point3;
+  });
+}
+
+/**
+ * How far somebody in this lane actually walks, foot of the stair to the deck.
+ *
+ * `climbLength` is the centre line's, and a lane is a few centimetres longer:
+ * it takes the same treads but crosses each landing on its own side, and going
+ * UP it starts with the stride across the bottom step from the middle, where
+ * the walk in delivered them, to the side they are going up. The climb has to
+ * be timed against the line the employee is on, or the same declared climbing
+ * pace produces a slightly different one — which is exactly what
+ * `verify-journey` measures leg by leg.
+ */
+export function stairLaneLength(stair: BoardingStair, lane: number, fromMiddle: boolean): number {
+  const path = stairLanePath(stair, lane);
+  let total = fromMiddle
+    ? Math.hypot(path[0][0] - stair.path[0][0], path[0][2] - stair.path[0][2])
+    : 0;
+  for (let i = 1; i < path.length; i++) {
+    total += Math.hypot(
+      path[i][0] - path[i - 1][0],
+      path[i][1] - path[i - 1][1],
+      path[i][2] - path[i - 1][2],
+    );
+  }
+  return total;
+}
+
+export function stairFoot(stair: BoardingStair, lane: number): [number, number] {
+  const first = stairLanePath(stair, lane)[0];
+  return [first[0], first[2]];
+}
+
+export function stairHead(stair: BoardingStair, lane: number): [number, number, number] {
+  const path = stairLanePath(stair, lane);
+  const head = path[path.length - 1];
+  return [head[0], head[1], head[2]];
+}
 export const LANE_GAP = 0.25;
 
 /** Standing room on the boarding deck, measured outward from the seats. */
@@ -444,6 +594,133 @@ function solveDeckOffset(
   return minOffset + DECK_SEARCH_CAP;
 }
 
+/**
+ * THE GIGA COASTER BOARDS THROUGH ITS OWN STATION.
+ *
+ * Every other department ride had to be given a deck, because none of them had
+ * one: a wheel, a swinging ship, a spider and a pendulum are all boarded off
+ * the ground, and the platform beside them is this park's addition. The Giga
+ * Coaster is the exception. It was built with a real station — boards level
+ * with the car floor, running the length of the train, a canopy over them and
+ * one straight flight of the park's own step up — because a coaster is loaded
+ * that way, and it had that station long before anybody rode it.
+ *
+ * Solving a second platform to stand beside the first would have put two decks
+ * at slightly different heights forty metres apart on the same straight. So
+ * this reads the station instead, and the whole train is boardable: the
+ * platform is longer than the train, so every one of the thirty-two seats has
+ * boards beside it.
+ *
+ * The step geometry is still the park's — the rise, going and width come from
+ * this module and are handed to `stationFlight`, which is also what
+ * `Station.tsx` draws from — so the treads an employee climbs are the treads
+ * on screen.
+ */
+function gigaStationStair(): BoardingStair {
+  const rideId: DepartmentRideId = "giga";
+  const flight = stationFlight(STAIR_RISE, STAIR_GOING, STAIR_WIDTH);
+  const outward = GIGA_PLATFORM_OUTWARD;
+  const along = GIGA_PLATFORM_ALONG;
+  const deck = GIGA_PLATFORM_CENTER;
+
+  /*
+   * WHICH SEATS THE BOARDS REACH: the sixteen on the platform side.
+   *
+   * The station is single-sided, as a coaster station is, so a rider steps
+   * across into the seat beside the boards. The far seat of each row is on the
+   * other side of the car — up to 6.3 u away, which is a scramble across
+   * somebody else's lap rather than a step — so the boards do not offer it.
+   *
+   * The rule is the park's own reach, `BOARD_REACH`: a seat is served when
+   * getting into it from the nearest place on the boards is a step up rather
+   * than a climb. That admits exactly the sixteen near-side seats, which is
+   * three times the busiest day DevOps ever has.
+   *
+   * Ordered along the platform, front of the train to the back, which is the
+   * order the boards present them in and the order a dispatch fills them.
+   */
+  const alongOf = (i: number) => {
+    const p = seatPose(rideId, i, 0);
+    return (p.x - deck[0]) * along[0] + (p.z - deck[1]) * along[1];
+  };
+  const outOf = (i: number) => {
+    const p = seatPose(rideId, i, 0);
+    return (p.x - deck[0]) * outward[0] + (p.z - deck[1]) * outward[1];
+  };
+  const halfOut = GIGA_PLATFORM_WIDTH / 2;
+  const seats = Array.from({ length: rideSeatCount(rideId) }, (_, i) => i)
+    .filter((i) => {
+      const p = seatPose(rideId, i, 0);
+      /* The step from the nearest boards to the seat: across, and up. */
+      const across = Math.max(0, Math.abs(outOf(i)) - halfOut + 0.35);
+      return Math.hypot(across, p.y - GIGA_PLATFORM_Y) <= BOARD_REACH;
+    })
+    .sort((a, b) => alongOf(a) - alongOf(b) || a - b);
+
+  const foot: Point3 = [flight.foot[0], 0, flight.foot[1]];
+  const head: Point3 = [flight.head[0], GIGA_PLATFORM_Y, flight.head[1]];
+  const flights: StairFlight[] = [{ from: foot, to: head, steps: flight.steps }];
+
+  /*
+   * UP THE TREADS, then along the boards to the middle of them.
+   *
+   * Riser then tread, exactly as `solveBoardingStair` walks its own flights and
+   * exactly as `Station.tsx` draws these: a climber's feet land ON each step
+   * rather than gliding up a ramp through the middle of the staircase.
+   */
+  const path: Point3[] = [foot];
+  const runX = (head[0] - foot[0]) / flight.steps;
+  const runZ = (head[2] - foot[2]) / flight.steps;
+  for (let k = 0; k < flight.steps; k++) {
+    const y = flight.stepRise * (k + 1);
+    /* Up the riser, at the near edge of the tread... */
+    path.push([foot[0] + runX * k, y, foot[2] + runZ * k]);
+    /* ...then along the tread, to its far edge. */
+    path.push([foot[0] + runX * (k + 1), y, foot[2] + runZ * (k + 1)]);
+  }
+  path.push([deck[0], GIGA_PLATFORM_Y, deck[1]]);
+
+  let climbLength = 0;
+  for (let i = 1; i < path.length; i++) {
+    climbLength += Math.hypot(
+      path[i][0] - path[i - 1][0],
+      path[i][1] - path[i - 1][1],
+      path[i][2] - path[i - 1][2],
+    );
+  }
+
+  /* The queue runs back from the bottom step, away from the platform. */
+  const back: readonly [number, number] = [
+    foot[0] - head[0],
+    foot[2] - head[2],
+  ];
+  const backLen = Math.hypot(back[0], back[1]) || 1;
+  const queueDir: readonly [number, number] = [back[0] / backLen, back[1] / backLen];
+  const base: readonly [number, number] = [foot[0], foot[2]];
+  const queue = Array.from({ length: seats.length }, (_, i) => {
+    const away = QUEUE_STANDOFF + i * QUEUE_PITCH;
+    return [base[0] + queueDir[0] * away, base[1] + queueDir[1] * away] as const;
+  });
+
+  return {
+    rideId,
+    seats,
+    outward,
+    along,
+    deckY: GIGA_PLATFORM_Y,
+    levelledDeckY: GIGA_PLATFORM_Y,
+    deck,
+    deckHalfAlong: GIGA_PLATFORM_HALF_ALONG,
+    deckHalfOut: GIGA_PLATFORM_WIDTH / 2,
+    base,
+    flights,
+    landings: [],
+    climbLength,
+    path,
+    queue,
+  };
+}
+
 export function solveBoardingStair(
   rideId: DepartmentRideId,
   seatsPerDeck: number,
@@ -713,6 +990,35 @@ export function solveBoardingStair(
 }
 
 /**
+ * THE nTH PLACE IN A RIDE'S BOARDING LINE, however long the line gets.
+ *
+ * A stair is drawn with as many places as its deck has seats, which is what a
+ * queue rail is built for. A real morning can put more people than that in the
+ * line — the Ferris Wheel's deck reaches ten cabins and twenty-seven employees
+ * come to it — and the old code clamped anyone past the end onto the last
+ * place, stacking them into one another.
+ *
+ * So the line simply continues: past the drawn rail it runs on in the same
+ * direction at the same human pitch. Nobody is ever put on somebody else's
+ * place, and the drawn rail still covers the length the deck can load.
+ */
+export function queuePlace(stair: BoardingStair, index: number): readonly [number, number] {
+  const drawn = stair.queue;
+  if (index < drawn.length) return drawn[index];
+
+  const last = drawn[drawn.length - 1];
+  const from = drawn.length > 1 ? drawn[drawn.length - 2] : stair.base;
+  const dx = last[0] - from[0];
+  const dz = last[1] - from[1];
+  const len = Math.hypot(dx, dz) || 1;
+  const beyond = index - (drawn.length - 1);
+  return [
+    last[0] + (dx / len) * beyond * QUEUE_PITCH,
+    last[1] + (dz / len) * beyond * QUEUE_PITCH,
+  ] as const;
+}
+
+/**
  * Where on the deck a climber stands before stepping into a given seat: level
  * with the seat, on the deck's inner edge.
  */
@@ -746,9 +1052,118 @@ export function stairCapacity(stair: BoardingStair): number {
  * says a dispatch is; a ride whose stopped position offers more level seats
  * than that keeps them, so a bigger group still fits.
  */
+/**
+ * KEEP ONLY THE SEATS THE BOARDS CAN ACTUALLY REACH.
+ *
+ * A deck built to serve every seat a ride presents at rest is right about the
+ * HEIGHTS and wrong about the distances: the UFO Pendulum's thirty seats ring
+ * its saucer and the Monster Ride's sixteen tubs hang off a spider, so a flat
+ * platform beside them is a stride from some and twenty-eight metres from
+ * others. Getting into the far ones is not a step across, it is a walk around
+ * the machine at deck height.
+ *
+ * So the deck is solved for all of them — which is what makes it long enough to
+ * be worth having — and then offers only those within the park's own reach of
+ * it, exactly as the Giga Coaster's station offers only the near side of its
+ * train. Everything else about the stair is untouched.
+ */
+function reachOf(stair: BoardingStair, seat: number): number {
+  const p = seatPose(stair.rideId, seat, 0);
+  const spot = deckSpotFor(stair, seat);
+  return Math.hypot(p.x - spot[0], p.z - spot[2]);
+}
+
+function withinReach(stair: BoardingStair): BoardingStair {
+  const seats = stair.seats.filter((i) => {
+    const p = seatPose(stair.rideId, i, 0);
+    const spot = deckSpotFor(stair, i);
+    /*
+     * ACROSS, not up. How far a seat sits above or below the boards is already
+     * settled by the height window the deck was solved in — the Ferris Wheel's
+     * cabins rise away from a flat platform and the park has always accepted
+     * that as a climb into a cabin. What it has never accepted, and what the
+     * wider decks introduced, is a seat you would have to WALK to: the far side
+     * of a spider or the other end of a saucer's ring.
+     */
+    return Math.hypot(p.x - spot[0], p.z - spot[2]) <= BOARD_REACH;
+  });
+  if (seats.length >= PLATFORM_SEATS) return { ...stair, seats };
+  /*
+   * NEVER FEWER THAN THE PLATFORM WAS BUILT FOR. The Monster Ride's tubs hang
+   * off a spider and only eight of them come within a stride of any flat floor,
+   * which is fewer than the deck has always presented. Rather than take seats
+   * away from a ride that had them, it keeps the nearest PLATFORM_SEATS — the
+   * same figure, now a floor rather than a cap.
+   */
+  const nearest = [...stair.seats].sort((a, b) => reachOf(stair, a) - reachOf(stair, b));
+  return { ...stair, seats: nearest.slice(0, PLATFORM_SEATS).sort((a, b) => a - b) };
+}
+
+/** The longest step from the boards into any seat the deck presents. */
+function worstStep(stair: BoardingStair): number {
+  return Math.max(
+    ...stair.seats.map((i) => {
+      const p = seatPose(stair.rideId, i, 0);
+      const spot = deckSpotFor(stair, i);
+      return Math.hypot(p.x - spot[0], p.y - spot[1], p.z - spot[2]);
+    }),
+  );
+}
+
+/**
+ * The MOST seats a deck can present and still be stepped off into all of them.
+ *
+ * Presenting every seat the ride can offer is what keeps a department off a
+ * queue, and for most rides the whole set is reachable. Two things can put a
+ * seat out of reach, and they behave differently. On the Ferris Wheel and the
+ * Monster Ride it is the machine: cabins on a rim and tubs on a spider are not
+ * coplanar with any flat floor, so no subset of them is all within a stride and
+ * dropping seats would only cost the ride capacity for nothing.
+ *
+ * On the Roller Coaster it is the train: its station stands on the lift slope,
+ * so the last car rests six metres above the first and two metres past the end
+ * of the boards. Levelling the deck on the midpoint puts that car a metre above
+ * a stride — so the deck stops one car short and the coaster loads the ten it
+ * can reach. The car is still there and the ride still runs it; it is simply
+ * not one this platform loads.
+ *
+ * So: take the largest deck whose every seat is a step away, and if no deck
+ * down to the boarding-group floor manages it, keep the full one.
+ */
+function reachableDeck(id: DepartmentRideId, floor: number): BoardingStair {
+  const present = Math.max(floor, boardingSeats(id).length);
+  const full = withinReach(solveBoardingStair(id, present));
+  for (let n = present; n >= floor; n--) {
+    const deck = withinReach(solveBoardingStair(id, n));
+    if (worstStep(deck) <= EMPLOYEE_HEIGHT + 1e-9) return deck;
+  }
+  return full;
+}
+
 export function solveBoardingStairs(seatsPerDeck: number): Record<DepartmentRideId, BoardingStair> {
   return Object.fromEntries(
-    DEPARTMENT_RIDE_IDS.map((id) => [id, solveBoardingStair(id, seatsPerDeck)]),
+    DEPARTMENT_RIDE_IDS.map((id) => [
+      id,
+      /* The Giga Coaster came with a station; it is not given a second one. */
+      id === "giga"
+        ? gigaStationStair()
+        : /*
+           * EVERY SEAT THE RIDE CAN ACTUALLY PRESENT, not a flat ten.
+           *
+           * `seatsPerDeck` was one number for all of them, chosen when the
+           * largest department in the park was ten people. It is the wrong
+           * shape for a real attendance file: it left the Dragon Ship — whose
+           * forty seats all stand at one height, every one of them within a
+           * step of the boards — offering ten, and employees queueing beside
+           * thirty empty places.
+           *
+           * What a ride can present is a fact about the machine, and
+           * `boardingSeats` already works it out from the ride's own geometry.
+           * The flat figure survives as the FLOOR a deck is built to, which is
+           * what it always really was.
+           */
+          reachableDeck(id, seatsPerDeck),
+    ]),
   ) as Record<DepartmentRideId, BoardingStair>;
 }
 

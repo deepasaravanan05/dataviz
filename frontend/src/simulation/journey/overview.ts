@@ -57,7 +57,10 @@ export function departmentOverview(
       checkedIn,
       delayed: checkedIn - started,
       started,
-      avgDelay: staff.reduce((s, e) => s + e.delayMinutes, 0) / Math.max(1, staff.length),
+      /* The sheet's own whole-minute Delay Time column, which is what every
+         other surface prints, so the table cannot disagree with the panel. */
+      avgDelay:
+        staff.reduce((s, e) => s + e.reportedDelayMinutes, 0) / Math.max(1, staff.length),
     };
   });
 }

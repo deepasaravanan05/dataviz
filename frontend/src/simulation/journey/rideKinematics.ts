@@ -26,6 +26,23 @@ import { TRACK_LENGTH } from "@/components/roller-coaster/trackCurve";
 import { carTransform, createCarTransform } from "@/components/roller-coaster/trainKinematics";
 import { SEATS as COASTER_SEATS } from "@/components/roller-coaster/seatManifest";
 
+/* --- Giga Coaster --------------------------------------------------- */
+import {
+  CAR_PITCH as GIGA_CAR_PITCH,
+  ROWS_PER_CAR as GIGA_ROWS_PER_CAR,
+  ROW_PITCH as GIGA_ROW_PITCH,
+  SEATS_PER_ROW as GIGA_SEATS_PER_ROW,
+  SEAT_COUNT as GIGA_SEAT_COUNT,
+  SEAT_SURFACE_Y as GIGA_SEAT_Y,
+  SEAT_WIDTH as GIGA_SEAT_WIDTH,
+} from "@/components/giga-coaster/constants";
+import { RUN_SECONDS as GIGA_RUN_SECONDS, runDistanceAt as gigaDistanceAt } from "@/components/giga-coaster/coasterMotion";
+import { frameAtDistance as gigaFrameAt } from "@/components/giga-coaster/trackFrames";
+import {
+  RIDE_FACING as GIGA_FACING,
+  RIDE_ORIGIN as GIGA_ORIGIN,
+} from "@/components/giga-coaster/placement";
+
 /* --- Monster Ride --------------------------------------------------- */
 import {
   ARM_ATTACH_HEIGHT,
@@ -232,6 +249,10 @@ function ferrisSeat(index: number, t: number): Matrix4 {
 const _car = createCarTransform();
 const _carM = new Matrix4();
 const _one = new Vector3(1, 1, 1);
+/* The Giga Coaster's car basis, held rather than allocated per seat. */
+const _gigaRight = new Vector3();
+const _gigaBasis = new Matrix4();
+const _gigaCar = new Matrix4();
 
 function coasterSeat(index: number, t: number): Matrix4 {
   const seat = COASTER_SEATS[index];
@@ -245,6 +266,61 @@ function coasterSeat(index: number, t: number): Matrix4 {
     T(COASTER_ORIGIN[0], COASTER_ORIGIN[1], COASTER_ORIGIN[2]),
     take().copy(_carM),
     T(seat.side * COASTER_SEAT_X, COASTER_SEAT_Y, coasterRowZ(seat.row)),
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Giga Coaster                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * WHERE ONE OF THE GIGA COASTER'S THIRTY-TWO SEATS IS, at run time `t`.
+ *
+ * Eight cars of two rows of two, and the whole train is driven by ONE number —
+ * how far the lead car is round the circuit — exactly as `Train.tsx` drives it.
+ * Both read `runDistanceAt`, and both take a car's position AND its banked
+ * orientation from the same `frameAtDistance` the rails are drawn from, so a
+ * rider is on the seat that is drawn, banked with it through every corner and
+ * upside down where the track is.
+ *
+ * The seat index runs the way the train is built: car by car from the front,
+ * and within a car row by row, left seat then right.
+ *
+ * AT t = 0 THE TRAIN IS ON ITS STATION MARK, which is the pose the boarding
+ * deck is solved against, and `runDistanceAt` brings it back there at
+ * RUN_SECONDS. The ride's own LOAD and UNLOAD dwell is deliberately not part
+ * of that: how long it waits in the station is the employees' business now,
+ * and `rideOps.ts` decides it.
+ *
+ * Like the UFO Pendulum, this ride positions itself from its own placement
+ * module rather than from a layout offset, so the chain starts at its origin
+ * and its facing rather than at `parkPlacement`.
+ */
+function gigaSeat(index: number, t: number): Matrix4 {
+  const perCar = GIGA_ROWS_PER_CAR * GIGA_SEATS_PER_ROW;
+  const car = Math.floor(index / perCar);
+  const withinCar = index % perCar;
+  const row = Math.floor(withinCar / GIGA_SEATS_PER_ROW);
+  const side = withinCar % GIGA_SEATS_PER_ROW;
+
+  const frame = gigaFrameAt(gigaDistanceAt(t) - car * GIGA_CAR_PITCH);
+  /* The car's own axes: +X along the track, +Y out of it — the same basis
+     `Train.tsx` builds, so the rider is oriented like the car. */
+  _gigaRight.crossVectors(frame.tangent, frame.up).normalize().negate();
+  _gigaBasis.makeBasis(frame.tangent, frame.up, _gigaRight);
+  _gigaCar.copy(_gigaBasis).setPosition(frame.position);
+
+  return chain(
+    T(GIGA_ORIGIN[0], GIGA_ORIGIN[1], GIGA_ORIGIN[2]),
+    Ry(GIGA_FACING),
+    take().copy(_gigaCar),
+    T(
+      (row - (GIGA_ROWS_PER_CAR - 1) / 2) * GIGA_ROW_PITCH,
+      GIGA_SEAT_Y,
+      (side - (GIGA_SEATS_PER_ROW - 1) / 2) * GIGA_SEAT_WIDTH,
+    ),
+    /* Riders face the way the train is going, which is the car's own +X. */
+    Ry(Math.PI / 2),
   );
 }
 
@@ -441,6 +517,16 @@ const RIDES: Record<DepartmentRideId, RideKinematics> = {
     // One lap of the circuit.
     period: 1 / TRAIN_SPEED,
   },
+  giga: {
+    seatCount: GIGA_SEAT_COUNT,
+    seat: gigaSeat,
+    /*
+     * One circuit, chain to brake run. Not the ride's own CYCLE_SECONDS, which
+     * adds its load and unload dwell: the park's ride operations decide how
+     * long it stands in its station now.
+     */
+    period: GIGA_RUN_SECONDS,
+  },
   monster: {
     seatCount: MONSTER_RIDERS.length,
     seat: monsterSeat,
@@ -574,6 +660,38 @@ export function boardingSeats(rideId: DepartmentRideId): number[] {
  * Never more than the ride's own capacity, and never more than the seats that
  * are actually at the platform while it is stopped.
  */
+/**
+ * HOW BIG A RIDER MAY BE DRAWN: no bigger than the seat holding them.
+ *
+ * Figures in this park are enlarged with distance so that a person still reads
+ * as a person from across it — a rule that works everywhere somebody is
+ * standing on open ground, and falls apart the moment they are in a machine.
+ * Flying to the Ferris Wheel puts the camera 253 m back, where that rule draws
+ * a person sixteen metres tall: their body swallows the cabin, the rim and half
+ * the wheel, so an employee who was in exactly the right seat looked like a
+ * giant standing through the ride rather than somebody who had got into it.
+ * That is why boarding looked as though it were not happening.
+ *
+ * The honest ceiling is the machine's own: the gap between one seat and the
+ * next. A rider drawn up to that fills their seat and no more, which is what
+ * being in a seat looks like — on the Ferris Wheel that is a cabin every 5 m
+ * around the rim, so a rider may still be drawn half again life size and stays
+ * legible; on a ride whose seats are shoulder to shoulder it is life size.
+ */
+export function riderScaleCap(rideId: DepartmentRideId): number {
+  const seats = BOARDING_SEATS[rideId];
+  let closest = Infinity;
+  for (let i = 0; i < seats.length; i++) {
+    const a = seatPose(rideId, seats[i], 0);
+    for (let j = i + 1; j < seats.length; j++) {
+      const b = seatPose(rideId, seats[j], 0);
+      closest = Math.min(closest, Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z));
+    }
+  }
+  if (!Number.isFinite(closest)) return 1;
+  return Math.max(1, closest / EMPLOYEE_HEIGHT);
+}
+
 export function boardingCapacity(rideId: DepartmentRideId, rideCapacity: number): number {
   return Math.min(rideCapacity, BOARDING_SEATS[rideId].length);
 }

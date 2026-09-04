@@ -1,15 +1,18 @@
 /**
- * The attendance dataset, employee by employee.
+ * The attendance dataset, row by row and employee by employee.
  *
- * The other journey checks prove the rules hold in aggregate. This one walks
- * all thirty rows individually and asks the questions a person watching the
- * park would ask of each figure: is that the right name, did they really come
- * through the gate, did they sit because they were delayed, did they sit for
- * as long as their delay, and did they end up at their own department's ride.
+ * The other journey checks prove the rules hold in aggregate. This one goes to
+ * the source: it opens `data/final one.xlsx` itself, reads all 3,219 rows, and
+ * asserts that the module the park actually imports says exactly the same thing
+ * — every ID, name, department, date, check-in second, work-start second and
+ * delay. A transcription slip cannot pass here by agreeing with itself, because
+ * the two accounts come from different files.
  *
- * The expected values are read straight out of the source spreadsheet rather
- * than from `dataset.ts`, so a transcription slip cannot pass by agreeing with
- * itself.
+ * It then walks the animated date's employees one at a time and asks the
+ * questions a person watching the park would ask of each figure: is that the
+ * right name, did they really come through the gate, did they sit because they
+ * were delayed, did they sit for exactly their delay, and did they end up at
+ * their own department's ride.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +24,13 @@ import {
   LOOP_START,
   sampleJourney,
 } from "../src/simulation/journey/journey";
-import { EMPLOYEE_DATASET, parseClockTime } from "../src/simulation/journey/dataset";
+import {
+  ATTENDANCE_DATASET,
+  ATTENDANCE_DATES,
+  ATTENDANCE_SHEET,
+  ATTENDANCE_SOURCE,
+  EMPLOYEE_DATASET,
+} from "../src/simulation/journey/dataset";
 import { rideForDepartment } from "../src/components/park/departments";
 import { PARK_LAYOUT, rideById } from "../src/components/park/layout";
 import {
@@ -41,96 +50,143 @@ function check(label: string, ok: boolean, detail: string) {
   console.log(`[${ok ? "PASS" : "FAIL"}] ${label} — ${detail}`);
 }
 
-/* ---------- The spreadsheet itself, as the independent source ---------- */
+/* ---------- The workbook itself, as the independent source ---------- */
 /*
- * The workbook lives outside the app, so its exact location depends on how the
- * project was checked out. Look for it in the places it is actually kept
- * rather than assuming one, and say plainly where it was expected if it has
- * gone missing — this script is worthless without the real sheet, so silently
- * falling back to the transcription would defeat its whole purpose.
+ * It lives in the repository beside the app — `data/final one.xlsx` — so that
+ * this check has a real spreadsheet to read rather than a copy of the
+ * transcription it is supposed to be checking. If it is missing, say so and
+ * stop: silently falling back to `dataset.ts` would defeat the whole purpose.
  */
-const SHEET_CANDIDATES = [
-  join(__dirname, "..", "..", "attendance_data.xlsx"),
-  join(__dirname, "..", "..", "..", "attendance_data.xlsx"),
-  join(__dirname, "..", "attendance_data.xlsx"),
-];
-const SHEET = SHEET_CANDIDATES.find((p) => existsSync(p));
-if (!SHEET) {
-  console.error(
-    "Cannot find attendance_data.xlsx. Looked in:\n  " + SHEET_CANDIDATES.join("\n  "),
-  );
+const SHEET = join(__dirname, "..", "data", ATTENDANCE_SOURCE);
+if (!existsSync(SHEET)) {
+  console.error(`Cannot find the attendance workbook. Looked for:\n  ${SHEET}`);
   process.exit(1);
 }
 const wb = XLSX.read(readFileSync(SHEET), { type: "buffer" });
-const grid = XLSX.utils.sheet_to_json<string[]>(wb.Sheets["30 Employees"], {
+const grid = XLSX.utils.sheet_to_json<string[]>(wb.Sheets[ATTENDANCE_SHEET], {
   header: 1,
   blankrows: false,
   defval: "",
 });
+
+/** "09:45:30 AM" -> minutes of day, keeping the seconds. */
+function readClock(text: string): number {
+  const m = /^(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)$/i.exec(text.trim());
+  if (!m) throw new Error(`Unparseable time in the workbook: "${text}"`);
+  const hours = (Number(m[1]) % 12) + (/pm/i.test(m[4]) ? 12 : 0);
+  return hours * 60 + Number(m[2]) + Number(m[3]) / 60;
+}
+/** "6 mins" -> 6. */
+function readDelay(text: string): number {
+  const m = /^(-?\d+(?:\.\d+)?)\s*mins?$/i.exec(text.trim());
+  if (!m) throw new Error(`Unparseable delay in the workbook: "${text}"`);
+  return Number(m[1]);
+}
+
 interface SheetRow {
-  id: string; name: string; department: string;
-  checkIn: number; delay: number; workStart: number; checkOut: number;
+  date: string;
+  day: string;
+  id: string;
+  name: string;
+  department: string;
+  checkIn: number;
+  workStart: number;
+  delay: number;
 }
 const SHEET_ROWS: SheetRow[] = grid.slice(1).map((r) => ({
-  id: String(r[0]).trim(),
-  name: String(r[1]).trim(),
-  department: String(r[2]).trim(),
-  checkIn: parseClockTime(String(r[3]).trim()),
-  delay: String(r[4]).trim() === "No Delay" ? 0 : Number(/^(\d+) min$/.exec(String(r[4]).trim())![1]),
-  workStart: parseClockTime(String(r[5]).trim()),
-  checkOut: parseClockTime(String(r[6]).trim()),
+  date: String(r[0]).trim(),
+  day: String(r[1]).trim(),
+  id: String(r[2]).trim(),
+  name: String(r[3]).trim(),
+  department: String(r[4]).trim(),
+  checkIn: readClock(String(r[5])),
+  workStart: readClock(String(r[6])),
+  delay: readDelay(String(r[7])),
 }));
 
-console.log(`Reading ${SHEET_ROWS.length} rows straight from attendance_data.xlsx\n`);
+console.log(
+  `Reading ${SHEET_ROWS.length} rows straight from ${ATTENDANCE_SOURCE}, ` +
+    `sheet "${ATTENDANCE_SHEET}"\n`,
+);
 
-// ============ 1. The sheet is internally consistent ============
+// ============ 1. The workbook is internally consistent ============
 check(
-  "the spreadsheet has exactly 30 employees in 6 departments of 5",
-  SHEET_ROWS.length === 30 &&
-    new Set(SHEET_ROWS.map((r) => r.department)).size === 6 &&
-    [...new Set(SHEET_ROWS.map((r) => r.department))].every(
-      (d) => SHEET_ROWS.filter((r) => r.department === d).length === 5,
-    ),
-  [...new Set(SHEET_ROWS.map((r) => r.department))].join(", "),
+  "the workbook holds a real attendance record, not a sample of one",
+  SHEET_ROWS.length === 3219 && new Set(SHEET_ROWS.map((r) => r.date)).size === 49,
+  `${SHEET_ROWS.length} rows across ${new Set(SHEET_ROWS.map((r) => r.date)).size} dates, ` +
+    `${new Set(SHEET_ROWS.map((r) => r.id)).size} distinct employees in ` +
+    `${new Set(SHEET_ROWS.map((r) => r.department)).size} departments`,
 );
 check(
-  "work start is check-in plus delay on every row of the sheet",
-  SHEET_ROWS.every((r) => r.workStart === r.checkIn + r.delay),
-  "the arithmetic the whole visualisation rests on",
+  /*
+   * The two time columns and the delay column agree to the MINUTE, which is
+   * the relation the sheet actually satisfies: a check-in of 09:45:30 and a
+   * work start of 09:52:05 is a gap of 6 min 35 s and the sheet calls it
+   * "6 mins". The park keeps both — the printed minutes decide who was delayed,
+   * the gap to the second decides how long they wait — so both are asserted.
+   */
+  "Actual Work Start is Check-in plus Delay Time on every row of the workbook",
+  SHEET_ROWS.every((r) => {
+    const gap = (((r.workStart - r.checkIn) % 1440) + 1440) % 1440;
+    return Math.floor(gap + 1e-9) === r.delay;
+  }),
+  "the arithmetic the whole visualisation rests on, on all 3,219 rows",
 );
 check(
-  "check-out is after work start on every row",
-  SHEET_ROWS.every((r) => r.checkOut > r.workStart),
-  `check-outs run ${formatSimTime(Math.min(...SHEET_ROWS.map((r) => r.checkOut)))}–` +
-    `${formatSimTime(Math.max(...SHEET_ROWS.map((r) => r.checkOut)))}`,
+  "every employee appears at most once on a date",
+  new Set(SHEET_ROWS.map((r) => `${r.date}|${r.id}`)).size === SHEET_ROWS.length,
+  "no date double-counts anybody",
 );
 
 // ============ 2. The transcription is exact ============
 {
   let wrong = "";
-  for (const r of SHEET_ROWS) {
-    const d = EMPLOYEE_DATASET.find((x) => x.id === r.id);
-    if (!d) { wrong = `${r.id} missing from dataset.ts`; break; }
-    if (d.name !== r.name) wrong = `${r.id} name "${d.name}" != "${r.name}"`;
-    else if (d.department !== r.department) wrong = `${r.id} department "${d.department}" != "${r.department}"`;
-    else if (d.checkIn !== r.checkIn) wrong = `${r.id} check-in`;
-    else if (d.delayMinutes !== r.delay) wrong = `${r.id} delay ${d.delayMinutes} != ${r.delay}`;
-    else if (d.workStart !== r.workStart) wrong = `${r.id} work start`;
-    else if (d.checkOut !== r.checkOut) wrong = `${r.id} check-out`;
-    if (wrong) break;
+  for (let i = 0; i < SHEET_ROWS.length && !wrong; i++) {
+    const r = SHEET_ROWS[i];
+    const d = ATTENDANCE_DATASET[i];
+    if (!d) wrong = `row ${i + 2} missing from the generated module`;
+    else if (d.id !== r.id) wrong = `row ${i + 2} id "${d.id}" != "${r.id}"`;
+    else if (d.name !== r.name) wrong = `${r.id} name "${d.name}" != "${r.name}"`;
+    else if (d.department !== r.department)
+      wrong = `${r.id} department "${d.department}" != "${r.department}"`;
+    else if (d.date !== r.date) wrong = `${r.id} date "${d.date}" != "${r.date}"`;
+    else if (d.day !== r.day) wrong = `${r.id} day "${d.day}" != "${r.day}"`;
+    else if (Math.abs(d.checkIn - r.checkIn) > 1e-9) wrong = `${r.id} check-in`;
+    else if (d.reportedDelayMinutes !== r.delay)
+      wrong = `${r.id} delay ${d.reportedDelayMinutes} != ${r.delay}`;
+    else if (Math.abs((d.workStart % 1440) - r.workStart) > 1e-9) wrong = `${r.id} work start`;
   }
   check(
-    "every field of every row matches the spreadsheet exactly",
-    wrong === "" && EMPLOYEE_DATASET.length === SHEET_ROWS.length,
-    wrong || `${SHEET_ROWS.length} rows x 7 fields transcribed without a slip`,
+    "every field of every row matches the workbook exactly",
+    wrong === "" && ATTENDANCE_DATASET.length === SHEET_ROWS.length,
+    wrong || `${SHEET_ROWS.length} rows x 8 fields transcribed without a slip`,
+  );
+  check(
+    "and the row ORDER is the workbook's own",
+    ATTENDANCE_DATASET.every((d, i) => d.id === SHEET_ROWS[i].id && d.date === SHEET_ROWS[i].date),
+    "no sorting, grouping or de-duplication happened on the way in",
+  );
+  check(
+    "nothing was dropped: every date in the workbook is a date the park can show",
+    ATTENDANCE_DATES.length === new Set(SHEET_ROWS.map((r) => r.date)).size &&
+      ATTENDANCE_DATES.every((d) => SHEET_ROWS.some((r) => r.date === d)),
+    `${ATTENDANCE_DATES.length} dates, ${ATTENDANCE_DATES[0]} to ${ATTENDANCE_DATES[ATTENDANCE_DATES.length - 1]}`,
   );
 }
 
-// ============ 3. Per-employee behaviour, all thirty ============
+// ============ 3. Per-employee behaviour, for the animated date ============
+/*
+ * The park animates one DATE at a time — that is what a working morning is —
+ * so this walks the whole of that date's roster. The rows come from the
+ * workbook, not from the module, so an employee is checked against the
+ * spreadsheet even here.
+ */
+const ANIMATED_DATE = EMPLOYEE_DATASET[0].date!;
+const TODAY = SHEET_ROWS.filter((r) => r.date === ANIMATED_DATE);
 const problems: string[] = [];
 const gateRadius = 55;
 
-for (const r of SHEET_ROWS) {
+for (const r of TODAY) {
   const e = EMPLOYEE_BY_ID[r.id];
   const say = (m: string) => problems.push(`${r.id} ${m}`);
   if (!e) { say("has no journey at all"); continue; }
@@ -139,16 +195,16 @@ for (const r of SHEET_ROWS) {
   if (e.name !== r.name) say("carries the wrong name");
   if (e.department !== r.department) say("carries the wrong department");
   if (e.rideId !== rideForDepartment(r.department).rideId) say("walks to the wrong ride");
-  if (e.delayMinutes !== r.delay) say("carries the wrong delay");
-  if (e.workStart !== r.workStart) say("carries the wrong work start");
-  if (e.checkOut !== r.checkOut) say("carries the wrong check-out");
+  if (e.reportedDelayMinutes !== r.delay) say("carries the wrong delay");
+  if (Math.abs((e.workStart % 1440) - r.workStart) > 1e-9) say("carries the wrong work start");
+  if (Math.abs(e.checkInTime - r.checkIn) > 1e-9) say("carries the wrong check-in");
 
   /* Spawned OUTSIDE the gate, never inside the park. */
   const first = e.route[0];
   if (first.z < GATE_Z + 30) say("spawns inside the park instead of outside the gate");
   if (Math.abs(first.z - SPAWN_Z) > 60) say("does not spawn on the arrival road");
 
-  /* Crossed the gate, at the exact check-in minute. */
+  /* Crossed the gate, at the exact check-in second. */
   const atGate = e.route.find((w) => w.phase === "CHECKING_IN");
   if (!atGate) say("never checks in at the gate");
   else {
@@ -180,11 +236,22 @@ for (const r of SHEET_ROWS) {
       if (Math.hypot(seat[0] - FOOD_COURT_CENTER[0], seat[1] - FOOD_COURT_CENTER[1]) > FOOD_COURT_HALF)
         say("was given a chair outside the food court");
     }
-    /* The sit is the delay, less walking — and never longer than the delay. */
-    if (e.sitMinutes >= r.delay) say("sits for longer than their whole delay");
-    if (e.sitMinutes < 1) say("sits for less than a visible minute");
+    /*
+     * THE SIT IS THE DELAY, EXACTLY — the wait in the food court equals the
+     * Delay Time, which is the one number a viewer can check against the sheet
+     * by watching a clock. It used to be the delay LESS the walking; the
+     * walking is outside it now, which is why the visit is longer than the sit
+     * rather than equal to it.
+     */
+    if (Math.abs(e.sitMinutes - (r.workStart - r.checkIn + 1440) % 1440) > 1e-9)
+      say("does not sit for exactly their own delay");
+    if (Math.floor(e.sitMinutes + 1e-9) !== r.delay) say("sits for a different number of minutes than the sheet prints");
+
     const visit = e.foodCourtExit! - e.foodCourtEntry!;
-    if (Math.abs(visit - e.sitMinutes) > 0.05) say("visit length and sit length disagree");
+    if (visit < e.sitMinutes - 1e-6) say("the visit is shorter than the sit inside it");
+    if (e.sitStart === null || e.sitEnd === null) say("has no seated window at all");
+    else if (e.sitStart < e.foodCourtEntry! || e.sitEnd > e.foodCourtExit! + 1e-6)
+      say("sits outside their own visit to the court");
   }
 
   /* Ends at their own ride, at the right time, and never early. */
@@ -203,60 +270,76 @@ for (const r of SHEET_ROWS) {
     const reach = Math.max(own.halfX, own.halfZ);
     if (nearest.d > reach + 60) say("stands too far from their ride to be at it");
   }
-  if (e.workStartActual < r.workStart - 1e-9) say("starts work before the sheet says");
+  if (e.workStartActual < e.workStart - 1e-9) say("starts work before the sheet says");
 
-  /* And stays in the seat: no climb down, no walk home. */
-  if (sampleJourney(e, r.checkOut + 0.5)?.onRide !== true) say("does not stay on their ride at check-out");
+  /*
+   * And then off the ride again, back to their department's own spot.
+   *
+   * A seat used to be held for the rest of the day, which capped a ride's whole
+   * day at the ten seats its deck reaches. This workbook puts up to ninety-six
+   * people through one date, so seats have to come free.
+   */
+  if (sampleJourney(e, e.rideExit + 0.5)?.onRide !== false) say("never gets off their ride");
   const last = e.route[e.route.length - 1];
-  if (last.phase !== "SITTING_ON_RIDE") say("has a waypoint after the seat they sat down in");
-  if (sampleJourney(e, e.despawnTime + 0.5) !== null) say("is still on screen after going home");
+  if (last.phase !== "WORKING") say("does not end their day standing at their department");
+  if (sampleJourney(e, e.despawnTime + 0.5) !== null) say("is still on screen after the day ends");
 
   /* The whole thing fits in the simulated day. */
   if (e.spawnTime < LOOP_START || e.despawnTime > LOOP_END) say("falls outside the loop window");
 }
 
 check(
-  "all thirty employees behave exactly as their row says",
+  `all ${TODAY.length} employees of ${ANIMATED_DATE} behave exactly as their row says`,
   problems.length === 0,
-  problems.length ? problems.slice(0, 8).join(" | ") : "identity, gate, delay, seat, ride, check-out — 30/30",
+  problems.length
+    ? problems.slice(0, 8).join(" | ")
+    : `identity, gate, delay, chair, seat, ride and exit — ${TODAY.length}/${TODAY.length}`,
 );
 
 // ============ 4. The story reads at a glance ============
-const delayed = JOURNEY_EMPLOYEES.filter((e) => e.delayMinutes > 0);
-const onTime = JOURNEY_EMPLOYEES.filter((e) => e.delayMinutes === 0);
+const delayed = JOURNEY_EMPLOYEES.filter((e) => e.reportedDelayMinutes > 0);
+const onTime = JOURNEY_EMPLOYEES.filter((e) => e.reportedDelayMinutes === 0);
 check(
   "the two behaviours are the two halves of the roster",
   delayed.every((e) => e.visitsFoodCourt) &&
     onTime.every((e) => !e.visitsFoodCourt) &&
-    delayed.length + onTime.length === 30,
+    delayed.length + onTime.length === TODAY.length,
   `${delayed.length} sit out a delay, ${onTime.length} walk straight to work`,
 );
 check(
   "check-in is visibly NOT work start for the delayed",
   delayed.every((e) => e.workStartActual - e.checkInTime >= e.delayMinutes - 1e-6),
-  `delayed employees spend ${Math.min(...delayed.map((e) => e.delayMinutes))}–` +
-    `${Math.max(...delayed.map((e) => e.delayMinutes))} min between checking in and starting`,
+  `delayed employees spend ${Math.min(...delayed.map((e) => e.reportedDelayMinutes))}–` +
+    `${Math.max(...delayed.map((e) => e.reportedDelayMinutes))} min between checking in and starting`,
 );
 check(
   "the on-time half never waits anywhere on the way",
-  onTime.every((e) => e.route.every((w) => w.phase !== "IN_FOOD_COURT" && (w.phase !== "AT_RIDE" || w.depart - w.arrive < 0.3))),
+  onTime.every((e) =>
+    e.route.every((w) => w.phase !== "IN_FOOD_COURT" && (w.phase !== "AT_RIDE" || w.depart - w.arrive < 0.3)),
+  ),
   "no invented pauses between the gate and their ride",
 );
 
 /* ---------- Summary ---------- */
-console.log("\nEvery employee, as animated:");
-console.log("  id       name              department        check-in  delay   sit    ride            work      out");
+console.log(`\nEvery employee of ${ANIMATED_DATE}, as animated:`);
+console.log("  id       name                        department   check-in  delay   sit     ride            work");
 for (const e of JOURNEY_EMPLOYEES) {
   console.log(
-    `  ${e.id} ${e.name.padEnd(17)} ${e.department.padEnd(17)} ${formatSimTime(e.checkInTime).padStart(8)}  ` +
-      `${(e.delayMinutes ? `${e.delayMinutes}m` : "none").padStart(5)}  ${(e.sitMinutes ? e.sitMinutes.toFixed(1) : "-").padStart(5)}  ` +
-      `${e.rideName.padEnd(15)} ${formatSimTime(e.workStartActual).padStart(8)}  ${formatSimTime(e.checkOut).padStart(8)}`,
+    `  ${e.id} ${e.name.padEnd(27)} ${e.department.padEnd(12)} ${formatSimTime(e.checkInTime).padStart(8)}  ` +
+      `${(e.reportedDelayMinutes ? `${e.reportedDelayMinutes}m` : "none").padStart(6)}  ` +
+      `${(e.sitMinutes ? e.sitMinutes.toFixed(1) : "-").padStart(6)}  ` +
+      `${e.rideName.padEnd(15)} ${formatSimTime(e.workStartActual).padStart(8)}`,
   );
 }
 console.log(
   `\nDay runs ${formatSimTime(LOOP_START)} to ${formatSimTime(LOOP_END)} ` +
-    `(${(LOOP_END - LOOP_START).toFixed(0)} simulated minutes, ${((LOOP_END - LOOP_START) / 60).toFixed(1)} min of real time at 60x).`,
+    `(${(LOOP_END - LOOP_START).toFixed(0)} simulated minutes, ` +
+    `${((LOOP_END - LOOP_START) / 60).toFixed(1)} min of real time at 60x).`,
 );
 
-console.log(failures === 0 ? "\nOK: all 30 employees verified against the spreadsheet." : `\n${failures} CHECK(S) FAILED`);
+console.log(
+  failures === 0
+    ? `\nOK: ${SHEET_ROWS.length} workbook rows verified, and all ${TODAY.length} employees of ${ANIMATED_DATE} animated from them.`
+    : `\n${failures} CHECK(S) FAILED`,
+);
 process.exit(failures === 0 ? 0 : 1);

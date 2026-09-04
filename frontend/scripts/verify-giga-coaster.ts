@@ -1,4 +1,17 @@
 import { readFileSync } from "node:fs";
+import {
+  LAKE_CLEARANCE_RADIUS,
+  PARK_ORIGIN,
+  RADIAL_PATH_LENGTH,
+  RIDE_PLOT_RADIUS,
+  RIDE_RING_RADIUS,
+  RIDE_SLOT_BEARING,
+  radialStart,
+  rideEntrance,
+  ringCenterOf,
+  ringRadiusOf,
+  type RingRideId,
+} from "../src/components/park/parkRing";
 import { join } from "node:path";
 import {
   CAR_COUNT,
@@ -40,16 +53,12 @@ import {
 } from "../src/components/giga-coaster/coasterMotion";
 import { OVERALL_HEIGHT, OVERALL_REACH } from "../src/components/giga-coaster/envelope";
 import {
-  COMFORT_SLACK,
-  NEIGHBOUR_CENTER,
   RIDE_CENTER,
   RIDE_FACING,
-  gapToNeighbour,
-  hidesARide,
-  slackAt,
 } from "../src/components/giga-coaster/placement";
 import { PLATFORM_Y } from "../src/components/giga-coaster/station";
-import { MAIN_VIEWPOINT, PARK_LAYOUT } from "../src/components/park/layout";
+import { PARK_LAYOUT, rideById, rideScale } from "../src/components/park/layout";
+import { departmentFor } from "../src/components/park/departments";
 import { OVERALL_HEIGHT as TEACUPS_HEIGHT } from "../src/components/tea-cups/constants";
 import { placeById } from "../src/components/world/cameraPlaces";
 import { PARK_SHRUBS, PARK_TREES } from "../src/components/world/planting";
@@ -183,10 +192,18 @@ check(
     `${RUN_SECONDS.toFixed(0)} s a circuit, ${CYCLE_SECONDS.toFixed(0)} s a cycle with the dwell`,
   );
   check(
-    "the frame loop reads that table and does no physics of its own",
-    /setDistance\(trainStateAt\(clock\.current\)\.distance\)/.test(rideSource) &&
+    /*
+     * The frame loop still does no physics — it looks the train's place up —
+     * but the clock it looks it up ON has changed. It used to be the ride's
+     * own, wrapped at the cycle length; it is now the park's ride-operations
+     * clock, which reads zero whenever the schedule says this ride is stopped.
+     * That is what makes the train stand in its station for an arriving DevOps
+     * employee instead of running past them.
+     */
+    "the frame loop reads that table on the PARK's clock, and does no physics of its own",
+    /setDistance\(runDistanceAt\(rideAnimationSecondsNow\("giga"\)\)\)/.test(rideSource) &&
       !/simulationStore|rideSelectionStore/.test(rideSource),
-    "one line; no store and no simulation clock can reach it",
+    "one line, off the ride-operations clock; no store can reach it",
   );
   {
     const STEPS = 20_000;
@@ -274,59 +291,142 @@ check(
     `${(STAIR_RISE * 100).toFixed(0)} cm rise up to a ${PLATFORM_Y.toFixed(2)} m platform`,
 );
 
-/* ================= 5. NEAR THE TEA CUPS ================= */
+/* ================= 5. ITS SLOT ON THE PARK RING ================= */
 
-check(
-  "IT STANDS NEXT TO THE TEA CUPS, as close as the park's margins allow",
-  gapToNeighbour(rx, rz) > 0,
-  `${gapToNeighbour(rx, rz).toFixed(0)} m of clear ground between the two rides' circles; ` +
-    `${Math.hypot(rx - NEIGHBOUR_CENTER[0], rz - NEIGHBOUR_CENTER[1]).toFixed(0)} m centre to ` +
-    `centre, because a ${(OVERALL_REACH * 2).toFixed(0)} m circuit and an ` +
-    `${(80).toFixed(0)} m ride cannot stand closer`,
-);
-for (const { what, slack } of slackAt(rx, rz)) {
+/*
+ * THE BRIEF THAT PUT THIS RIDE HERE HAS CHANGED, and the checks change with it
+ * rather than being deleted.
+ *
+ * It was asked for the nearest clear ground to the Tea Cups, and the placement
+ * searched outward from them.
+ * This section then re-measured every margin that search had honoured, and
+ * asserted that the ride hid nothing from the main entrance.
+ *
+ * The park is a ring now. Every attraction has a numbered slot, the slots are
+ * solved together in `parkRing.ts` so a neighbour cannot crowd this ride
+ * however anything is resized, and `verify-park-layout.ts` measures the
+ * clearance between all ten in one place instead of each ride vouching for
+ * itself. What is left to check HERE is that this ride is actually standing on
+ * the slot it was given, and that the slot puts it where the plan says: on its
+ * own bearing, at the ring's radius, with its inner edge on the apron the ring
+ * path serves.
+ *
+ * The sightline check is gone, and not because it regressed. A concentric park
+ * puts five of its ten attractions on the far side of the lake from the gate,
+ * so from the entrance the near half stands in front of the far half by
+ * construction — that is what a ring IS. The property that replaces it, that
+ * every attraction holds its own share of the overview frame, is measured
+ * through the real camera in `verify-night.ts`.
+ */
+{
+  const dx = RIDE_CENTER[0] - PARK_ORIGIN[0];
+  const dz = RIDE_CENTER[1] - PARK_ORIGIN[1];
+  const radius = Math.hypot(dx, dz);
+  const bearing = (Math.atan2(dx, dz) * 180) / Math.PI;
+
   check(
-    `it clears ${what}`,
-    slack >= 0,
-    `${slack >= 0 ? "+" : ""}${slack.toFixed(1)} m beyond the margin it owes ` +
-      `(reach ${OVERALL_REACH.toFixed(0)} m)`,
+    "it stands exactly on its slot bearing, with nothing across it",
+    Math.abs(bearing - RIDE_SLOT_BEARING.giga) < 1e-9,
+    `${bearing.toFixed(6)}deg against the plan's ${RIDE_SLOT_BEARING.giga}deg`,
+  );
+  check(
+    "and at exactly the ring radius — the same as every other ride",
+    Math.abs(radius - RIDE_RING_RADIUS) < 1e-9 && Math.abs(radius - ringRadiusOf()) < 1e-9,
+    `${radius.toFixed(3)} m from the middle, and there is only one such radius`,
+  );
+  check(
+    "its platform is the park's one plot size, and its machine fits inside it",
+    RIDE_PLOT_RADIUS >= OVERALL_REACH,
+    `a ${(RIDE_PLOT_RADIUS * 2).toFixed(0)} m platform holding a ${(OVERALL_REACH * 2).toFixed(0)} m ride`,
+  );
+  const entrance = rideEntrance("giga");
+  const start = radialStart("giga");
+  check(
+    "its radial path runs down its own bearing, from the food court to its entrance",
+    Math.abs(
+      Math.atan2(start[0] - PARK_ORIGIN[0], start[1] - PARK_ORIGIN[1]) -
+        Math.atan2(entrance[0] - PARK_ORIGIN[0], entrance[1] - PARK_ORIGIN[1]),
+    ) < 1e-9,
+    `entrance at (${entrance[0].toFixed(1)}, ${entrance[1].toFixed(1)})`,
+  );
+  check(
+    "and it is the same length as every other radial in the park",
+    Math.abs(Math.hypot(entrance[0] - start[0], entrance[1] - start[1]) - RADIAL_PATH_LENGTH) < 1e-6,
+    `${Math.hypot(entrance[0] - start[0], entrance[1] - start[1]).toFixed(1)} m, ` +
+      `against a plan length of ${RADIAL_PATH_LENGTH.toFixed(1)} m`,
+  );
+  check(
+    "it is clear of the food court in the middle of the park",
+    radius - OVERALL_REACH > LAKE_CLEARANCE_RADIUS,
+    `inner edge ${(radius - OVERALL_REACH).toFixed(0)} m out, court ${LAKE_CLEARANCE_RADIUS} m`,
   );
 }
-check(
-  "and with room in hand",
-  Math.min(...slackAt(rx, rz).map((s) => s.slack)) >= COMFORT_SLACK - 1e-9,
-  `tightest margin ${Math.min(...slackAt(rx, rz).map((s) => s.slack)).toFixed(1)} m over, ` +
-    `against the ${COMFORT_SLACK} m the search insists on`,
-);
-check(
-  "it hides no ride from the entrance",
-  !hidesARide(rx, rz),
-  `nothing nearer to (${MAIN_VIEWPOINT[0]}, ${MAIN_VIEWPOINT[1]}) shares its slice of the view`,
-);
-check(
-  "its long side faces the entrance, so the lift hill reads as a lift hill",
-  (() => {
-    const planeX = Math.cos(RIDE_FACING);
-    const planeZ = -Math.sin(RIDE_FACING);
-    const toX = rx - MAIN_VIEWPOINT[0];
-    const toZ = rz - MAIN_VIEWPOINT[1];
-    const len = Math.hypot(toX, toZ) || 1;
-    return Math.abs((planeX * toX + planeZ * toZ) / len) < 1e-9;
-  })(),
-  "the circuit's long axis is exactly square to the line of sight",
-);
 
-/* ================= 6. NOTHING ELSE MOVED ================= */
+{
+  /*
+   * WHICH WAY IT FACES, measured rather than assumed.
+   *
+   * The ride's local +X is its long axis — the plane of a loop, the line of a
+   * circuit, the front of a platform — and a group rotated by `alpha` about +Y
+   * carries local +X to (cos alpha, -sin alpha) in world x/z. Presented to the
+   * people looking at it, that has to come out perpendicular to the line from
+   * the ride to the middle of the park.
+   *
+   * It used to be measured against the MAIN ENTRANCE, which was the same thing
+   * while every ride stood in a fan in front of the gate. On a ring it is not:
+   * people reach this ride off the ring path, which runs inside it.
+   */
+  const axisX = Math.cos(RIDE_FACING);
+  const axisZ = -Math.sin(RIDE_FACING);
+  const outX = RIDE_CENTER[0] - PARK_ORIGIN[0];
+  const outZ = RIDE_CENTER[1] - PARK_ORIGIN[1];
+  const outLen = Math.hypot(outX, outZ) || 1;
+  const dot = (axisX * outX + axisZ * outZ) / outLen;
+  const offBroadside = (Math.acos(Math.min(1, Math.abs(dot))) * 180) / Math.PI;
+  check(
+    "it presents itself broadside to the ring path, not end-on",
+    Math.abs(offBroadside - 90) < 1e-6,
+    `${offBroadside.toFixed(4)}deg between its long axis and the line in to the middle`,
+  );
+}
 
+/* ================= 6. IT JOINED THE ROUTING SYSTEM, AND MOVED NOTHING ======= */
+
+/*
+ * THIS SECTION USED TO SAY THE OPPOSITE, and the change is the user's:
+ * "the giga coaster is for devops team", and then, plainly, "the devops
+ * employees only go and sit on the giga coaster ride".
+ *
+ * It was an attraction with no department: not in the park layout, unknown to
+ * the layout module, and nobody routed to it. It is a department ride now. What
+ * has to be proved is that it took nothing from the park to become one — it
+ * stands where it stood, at the size it declares, and the five rides that were
+ * in the layout before are exactly where they were.
+ */
 check(
-  "the ride is not in the park layout — the solver was never re-run",
-  PARK_LAYOUT.length === 5 && !PARK_LAYOUT.some((r) => r.id === GIGA_RIDE_ID),
-  `${PARK_LAYOUT.length} rides in the solver, as before`,
+  "it is in the park layout now, on the very slot it already stood on",
+  PARK_LAYOUT.some((r) => r.id === GIGA_RIDE_ID) &&
+    Math.hypot(
+      rideById(GIGA_RIDE_ID).center[0] - RIDE_CENTER[0],
+      rideById(GIGA_RIDE_ID).center[1] - RIDE_CENTER[1],
+    ) < 1e-9,
+  `layout centre (${rideById(GIGA_RIDE_ID).center.map((n) => n.toFixed(1)).join(", ")}) ` +
+    `= its own placement, to the last digit`,
 );
 check(
-  "and the layout module does not know it exists",
-  !/giga-coaster|GigaCoaster/.test(layoutSource),
-  "no import, no box, no bearing added",
+  "and it is drawn at the size it declares — the solver did not scale it",
+  Math.abs(rideScale(GIGA_RIDE_ID) - 1) < 1e-12 &&
+    Math.abs(rideById(GIGA_RIDE_ID).height - OVERALL_HEIGHT) < 1e-9,
+  `${rideScale(GIGA_RIDE_ID).toFixed(3)}x — its crest reads out of the Tea Cups, which is ` +
+    `where the park's uniform height comes from, so the ratio is exactly one`,
+);
+check(
+  "listing it moved no other ride — every one is still on its own ring slot",
+  PARK_LAYOUT.every((r) => {
+    const slot = ringCenterOf(r.id as RingRideId);
+    return Math.hypot(r.center[0] - slot[0], r.center[1] - slot[1]) < 1e-9;
+  }),
+  `${PARK_LAYOUT.length} rides in the layout, each exactly on the slot parkRing.ts gives it`,
 );
 check(
   "it is mounted in world space, once, with no offset and no scale of its own",
@@ -340,13 +440,19 @@ check(
   "the five department rides are wrapped exactly as before",
 );
 check(
-  "no employee is routed to it — it is an attraction, not a destination",
-  JOURNEY_EMPLOYEES.every((e) => (e.rideId as string) !== GIGA_RIDE_ID),
-  `${JOURNEY_EMPLOYEES.length} employees, none bound for it`,
+  "DevOps ride it, and only DevOps",
+  JOURNEY_EMPLOYEES.filter((e) => (e.rideId as string) === GIGA_RIDE_ID).every(
+    (e) => e.department === "devops",
+  ) &&
+    JOURNEY_EMPLOYEES.filter((e) => e.department === "devops").every(
+      (e) => (e.rideId as string) === GIGA_RIDE_ID,
+    ),
+  `${JOURNEY_EMPLOYEES.filter((e) => e.department === "devops").length} devops employees on ` +
+    `this date, every one of them bound for the Giga Coaster and nobody else aboard`,
 );
 check(
-  "it is reachable by fast travel under its own name",
-  placeById(GIGA_RIDE_ID).label === GIGA_RIDE_NAME,
+  "it is reachable by fast travel under the department it serves",
+  placeById(GIGA_RIDE_ID).label === `${departmentFor(GIGA_RIDE_ID).department} — ${GIGA_RIDE_NAME}`,
   placeById(GIGA_RIDE_ID).label,
 );
 {
@@ -404,9 +510,10 @@ console.log(
     `${((MAX_BANK * 180) / Math.PI).toFixed(0)}°, home in ${RUN_SECONDS.toFixed(0)} s.`,
 );
 console.log(
-  `Standing at (${rx.toFixed(0)}, ${rz.toFixed(0)}) — ${gapToNeighbour(rx, rz).toFixed(0)} m of ` +
-    `clear ground from the Tea Cups, the nearest a circuit this size can legally stand. ` +
-    `Nothing else moved.`,
+  `Standing at (${rx.toFixed(1)}, ${rz.toFixed(1)}) — slot ${RIDE_SLOT_BEARING.giga}deg, `+
+    `${RIDE_RING_RADIUS.toFixed(0)} m out like every other ride, on a `+
+    `${(RIDE_PLOT_RADIUS * 2).toFixed(0)} m platform reached by a `+
+    `${RADIAL_PATH_LENGTH.toFixed(0)} m radial path. Every ride in the park has the same three.`,
 );
 console.log(failures === 0 ? "\nOK: giga coaster verified." : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

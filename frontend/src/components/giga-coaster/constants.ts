@@ -43,7 +43,6 @@ export type GigaRideId = typeof GIGA_RIDE_ID;
 
 /** The ride's own name. The park's other coaster keeps "Roller Coaster". */
 export const GIGA_RIDE_NAME = "Giga Coaster";
-
 /** The ride it was told to match, and to stand near. */
 export const SIZE_MATCH_ID = "teacups";
 
@@ -137,6 +136,16 @@ export const TRAIN_LENGTH = CAR_COUNT * CAR_PITCH;
 /** How far the car's floor sits above the rail it runs on. */
 export const CAR_RIDE_HEIGHT = 0.62 * CAR_SCALE * METRE;
 export const SEAT_PAN_Y = PROP.chairSeatY * CAR_SCALE;
+/**
+ * Where a RIDER sits, above the car's own origin — the floor height plus the
+ * pan on top of it.
+ *
+ * Every ride in this park publishes one of these and the boarding system reads
+ * exactly it, so the seat a person is placed in is the seat that is drawn. The
+ * two numbers it adds are the same two `Train.tsx` composes when it draws the
+ * cushion, which is why this is a sum here rather than a figure of its own.
+ */
+export const SEAT_SURFACE_Y = CAR_RIDE_HEIGHT + SEAT_PAN_Y;
 export const SEAT_BACK_HEIGHT = (HUMAN.shoulderY - PROP.chairSeatY) * CAR_SCALE;
 export const HARNESS_RADIUS = 0.055 * CAR_SCALE * METRE;
 

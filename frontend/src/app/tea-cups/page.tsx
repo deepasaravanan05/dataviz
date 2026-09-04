@@ -22,7 +22,8 @@ import {
   COMFORT_GEE,
 } from "@/components/tea-cups/constants";
 import { CYCLE_SECONDS } from "@/components/tea-cups/motion";
-import { BEHIND_DISTANCE, RIDE_CENTER } from "@/components/tea-cups/placement";
+import { RIDE_CENTER } from "@/components/tea-cups/placement";
+import { RIDE_SLOT_BEARING, ringRadiusOf } from "@/components/park/parkRing";
 
 /** Framed from the gate side, where the boarding steps are. */
 const CAMERA_POSITION: [number, number, number] = [
@@ -68,8 +69,8 @@ export default function TeaCupsPage() {
             {DECK_Y.toFixed(1)}m &mdash; every {CYCLE_SECONDS}s
           </div>
           <div>
-            Standing {BEHIND_DISTANCE.toFixed(0)}m behind the UFO Pendulum, which is the Data
-            Engineering ride
+            On the park ring, {ringRadiusOf("teacups").toFixed(0)}m out from the lake at a
+            bearing of {Math.abs(RIDE_SLOT_BEARING.teacups)}&deg; left of the entrance avenue
           </div>
         </div>
         <div className="mt-2 flex items-center gap-1">

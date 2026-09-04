@@ -5,8 +5,6 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import {
-  EMPLOYEE_BY_ID,
-  JOURNEY_EMPLOYEES,
   sampleJourney,
   type CheckInColor,
   type JourneyEmployee,
@@ -15,6 +13,7 @@ import { useActiveJourneyStore } from "@/simulation/journey/activeJourney";
 import { currentSimTime } from "@/simulation/journey/clock";
 import { formatSimTime } from "@/simulation/clock";
 import { FOOD_COURT_CHAIRS, FOOD_COURT_FACING } from "@/simulation/journey/constants";
+import { riderScaleCap } from "@/simulation/journey/rideKinematics";
 import { useJourneyStore } from "@/store/journeyStore";
 import { useCameraStore } from "@/store/cameraStore";
 import { rideById } from "@/components/park/layout";
@@ -32,7 +31,8 @@ import { DEFAULT_FIGURE_FOV, figureScale } from "./figureLegibility";
 import { CLIMB_PACE_FRACTION } from "@/simulation/journey/boardingStair";
 
 /**
- * The employees: thirty rigged, skinned human characters, one per dataset row.
+ * The employees: one rigged, skinned human character per dataset row — the
+ * whole of the selected date's attendance, which is up to ninety-six people.
  *
  * Each figure is a real character rig — see `humanRig.ts` — with a nineteen
  * bone skeleton, a skinned mesh whose every vertex carries four bone weights,
@@ -40,8 +40,8 @@ import { CLIMB_PACE_FRACTION } from "@/simulation/journey/boardingStair";
  * `AnimationMixer`. The mesh DEFORMS at its joints; nothing here translates a
  * frozen model across the ground. Geometry and clips are built once and shared
  * by the whole cast, while every employee owns their own skeleton and mixer,
- * which is what lets thirty people be at thirty different points of their own
- * morning at the same instant.
+ * which is what lets a roster be at as many different points of its own morning
+ * as it has people in it.
  *
  * The walk is paced by GROUND ACTUALLY COVERED rather than by elapsed time:
  * the clip is played at whatever rate makes its own stride match the distance
@@ -79,6 +79,10 @@ import { CLIMB_PACE_FRACTION } from "@/simulation/journey/boardingStair";
 
 /** How quickly a character turns to a new heading, in rad/s of shortfall. */
 const TURN_RATE = 9;
+/* How fast a figure eases between its legibility size and life size when it
+   steps onto a ride, or off it. A third of a second, so it reads as walking up
+   to the machine rather than as a pop. */
+const SCALE_EASE_RATE = 9;
 
 const H = HUMAN;
 const LEG_LENGTH = H.hipY - 0.06;
@@ -288,42 +292,22 @@ interface Look {
 }
 
 /**
- * Which of the roster's characters present as female. A curated styling table
- * for the character models (hair styles, silhouette), matched to the names the
- * attendance sheet gives its cast — EMP1003 "Riya Sharma" gets the female
- * build, EMP1004 "Reyansh Nair" the male one. Purely visual; nothing in the
- * simulation or the data reads it.
+ * ONE DETERMINISTIC LOOK PER EMPLOYEE, hashed from their ID.
+ *
+ * There used to be a curated table here — a hand-written list of which of the
+ * thirty transcribed employees presented as female, matched to the names the
+ * old sheet gave them. `data/final one.xlsx` has 142 people across 49 dates and
+ * the park shows a different roster every time the date changes, so a curated
+ * table is neither possible nor useful. Every figure's appearance is now
+ * derived from their employee ID, which means the same person looks the same on
+ * every date they appear, and the same on every reload.
+ *
+ * PURELY VISUAL. Nothing in the simulation or the data reads any of it. The one
+ * thing that is NOT hashed is the shirt: that is the check-in colour band, and
+ * it comes straight from the dataset.
  */
-const FEMALE_IDS = new Set([
-  "EMP1003", "EMP1006", "EMP1010", "EMP1012", "EMP1013", "EMP1014",
-  "EMP1015", "EMP1018", "EMP1020", "EMP1021", "EMP1022", "EMP1023",
-  "EMP1024", "EMP1025", "EMP1029", "EMP1030",
-]);
 
-const LOOKS: Record<string, Look> = Object.fromEntries(
-  JOURNEY_EMPLOYEES.map((e, i) => {
-    const rand = mulberry32(0xa11ce + i * 977);
-    const female = FEMALE_IDS.has(e.id);
-    const shirts = SHIRT_BY_BAND[e.color];
-    const styles = female ? FEMALE_HAIR : MALE_HAIR;
-    return [
-      e.id,
-      {
-        female,
-        shirt: shirts[Math.floor(rand() * shirts.length)],
-        skin: SKIN[Math.floor(rand() * SKIN.length)],
-        hair: HAIR[Math.floor(rand() * HAIR.length)],
-        hairStyle: styles[Math.floor(rand() * styles.length)],
-        trousers: TROUSERS[Math.floor(rand() * TROUSERS.length)],
-        trim: TRIM_BY_BAND[e.color],
-        shoe: SHOE[Math.floor(rand() * SHOE.length)],
-        build: (female ? 0.88 : 1.0) + rand() * 0.1,
-      } satisfies Look,
-    ];
-  }),
-);
-
-/** FNV-1a, for a stable per-id seed when the id is not in the curated cast. */
+/** FNV-1a, for a stable per-id seed: the same employee always looks the same. */
 function hashId(id: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < id.length; i++) {
@@ -334,17 +318,14 @@ function hashId(id: string): number {
 }
 
 /**
- * Appearance for an UPLOADED roster's employee. The built-in cast keeps its
- * curated looks; anyone else gets a deterministic one hashed from their id, so
- * the same uploaded person always looks the same. Keyed by id AND band,
- * because the shirt pool depends on the band — a built-in id uploaded with a
- * different delay must not wear a shirt that contradicts their band.
+ * Appearance for one employee, built once and remembered.
+ *
+ * Keyed by id AND band, because the shirt pool depends on the band: the same
+ * person checking in green on one date and red on another keeps their face and
+ * their build and changes only what the band decides.
  */
 const EXTRA_LOOKS = new Map<string, Look>();
 function lookFor(employee: JourneyEmployee): Look {
-  const curated = LOOKS[employee.id];
-  if (curated && EMPLOYEE_BY_ID[employee.id]?.color === employee.color) return curated;
-
   const key = `${employee.id}|${employee.color}`;
   const cached = EXTRA_LOOKS.get(key);
   if (cached) return cached;
@@ -778,6 +759,9 @@ function Figure({ employee, cacheKey }: { employee: JourneyEmployee; cacheKey: s
   /** Frame-to-frame walking state. Refs, so the compiler leaves them alone. */
   const heading = useRef({ value: 0, has: false });
   const last = useRef({ x: 0, y: 0, z: 0, has: false });
+  /* How big this figure is being drawn right now, so stepping onto a ride
+     eases them down to life size instead of snapping. */
+  const drawnScale = useRef({ value: 1, has: false });
 
   useEffect(() => {
     const h = holder.current;
@@ -881,7 +865,45 @@ function Figure({ employee, cacheKey }: { employee: JourneyEmployee; cacheKey: s
      */
     const cam = state.camera as THREE.PerspectiveCamera;
     const fov = cam.isPerspectiveCamera ? cam.fov : DEFAULT_FIGURE_FOV;
-    const scale = figureScale(d, fov, state.size.height);
+    /*
+     * ...BUT NOBODY IS ENLARGED WHILE THEY ARE ON A RIDE.
+     *
+     * Enlarging a figure so it stays readable across a park works everywhere a
+     * person is standing on open ground, and breaks down completely the moment
+     * they touch a machine: flying to the Ferris Wheel puts the camera 258 m
+     * back, where the rule draws a person 16 m tall against a cabin barely 2 m
+     * across. The rider was in the right place — `verify-boarding` measures
+     * that every instant — but what you saw was a giant standing through the
+     * wheel, not somebody getting into it, which is why boarding looked like it
+     * was not happening at all.
+     *
+     * A stair tread, a boarding deck and a seat are all built to human size, so
+     * from the moment an employee sets foot on the bottom step to the moment
+     * they step off it again they are drawn no bigger than the machine can hold
+     * — `riderScaleCap` is the gap from one of that ride's seats to the next,
+     * so they fill their own seat and nothing more. On the Ferris Wheel, whose
+     * cabins are five metres apart round the rim, that still leaves them half
+     * again life size and perfectly visible; on the Giga Coaster's train, where
+     * the seats are shoulder to shoulder, it is life size exactly.
+     *
+     * It is eased rather than switched, so walking up to a ride settles them to
+     * the size of the seat over a third of a second instead of popping.
+     */
+    const onTheRide =
+      s.onRide ||
+      s.phase === "CLIMBING_LADDER" ||
+      s.phase === "ON_PLATFORM" ||
+      s.phase === "EXITING_RIDE";
+    const legible = figureScale(d, fov, state.size.height);
+    const wanted = onTheRide ? Math.min(legible, riderScaleCap(employee.rideId)) : legible;
+    const sc = drawnScale.current;
+    if (!sc.has) {
+      sc.value = wanted;
+      sc.has = true;
+    } else {
+      sc.value += (wanted - sc.value) * Math.min(1, SCALE_EASE_RATE * delta);
+    }
+    const scale = sc.value;
     /* The person grows; the ground disc under them does not, because that disc
        is read from directly above where distance compensation would only make
        thirty of them overlap. */

@@ -17,7 +17,8 @@ import {
   TOP_SPEED,
 } from "@/components/giga-coaster/coasterMotion";
 import { OVERALL_HEIGHT } from "@/components/giga-coaster/envelope";
-import { RIDE_CENTER, gapToNeighbour } from "@/components/giga-coaster/placement";
+import { RIDE_CENTER } from "@/components/giga-coaster/placement";
+import { PLOT_CLEAR_GROUND, RIDE_SLOT_BEARING, ringRadiusOf } from "@/components/park/parkRing";
 
 const CAMERA_POSITION: [number, number, number] = [
   RIDE_CENTER[0] - 150,
@@ -58,8 +59,10 @@ export default function GigaCoasterPage() {
             generated from a corner radius, so it cannot pull more
           </div>
           <div>
-            Home in {RUN_SECONDS.toFixed(0)}s, {gapToNeighbour(RIDE_CENTER[0], RIDE_CENTER[1]).toFixed(0)}m
-            of clear ground from the Tea Cups
+            Home in {RUN_SECONDS.toFixed(0)}s, on the park ring{" "}
+            {ringRadiusOf("giga").toFixed(0)}m out at {Math.abs(RIDE_SLOT_BEARING.giga)}&deg; left
+            of the entrance &mdash; the same distance as every other ride, with{" "}
+            {PLOT_CLEAR_GROUND.toFixed(0)}m of landscaping to each neighbouring plot
           </div>
         </div>
         <div className="mt-2 flex items-center gap-1">

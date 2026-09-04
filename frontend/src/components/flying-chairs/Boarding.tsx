@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import {
   HANGER_RADIUS,
-  LADDER_AZIMUTH,
   LADDER_CAGE_FROM_Y,
   LADDER_CAGE_PITCH,
   LADDER_CAGE_RADIUS,
@@ -26,6 +25,7 @@ import {
   RAIL_POST_COUNT,
   RAIL_RADIUS,
 } from "./constants";
+import { LADDER_AZIMUTH } from "./placement";
 import { LAY_FLAT, MATERIAL } from "./parts";
 
 /**

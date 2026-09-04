@@ -1,7 +1,7 @@
 "use client";
 
 import { MainGate } from "@/components/main-gate/MainGate";
-import { FoodCourt } from "@/components/food-court/FoodCourt";
+import { GrandFoodCourt } from "@/components/food-court/GrandFoodCourt";
 import { SelectableFoodCourt } from "@/components/food-court/SelectableFoodCourt";
 import { BoardingStairs } from "@/components/park/BoardingStairs";
 import { Employees } from "./Employees";
@@ -23,7 +23,7 @@ export function ParkJourney() {
       <MainGate />
       {/* Clickable, and nothing more: the food court itself is untouched. */}
       <SelectableFoodCourt>
-        <FoodCourt />
+        <GrandFoodCourt />
       </SelectableFoodCourt>
       {/* Publishes who is inside it, off the simulated clock. Renders nothing. */}
       <FoodCourtOccupancy />

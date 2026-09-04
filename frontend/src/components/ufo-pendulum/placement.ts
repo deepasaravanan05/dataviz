@@ -1,4 +1,5 @@
-import { MAIN_VIEWPOINT, rideById } from "@/components/park/layout";
+import { rideById } from "@/components/park/layout";
+import { facingCenter } from "@/components/park/parkRing";
 import {
   STRUCTURE_HALF_ACROSS_SWING,
   STRUCTURE_HALF_ALONG_SWING,
@@ -30,8 +31,9 @@ export const RIDE_CENTER: [number, number] = rideById(UFO_RIDE_ID).center;
  *
  * A pendulum swinging towards you reads as a dot going up and down; the same
  * pendulum swinging across you reads as the hundred-metre arc it is. So the
- * ride is turned to present its swing plane broadside to the park's main
- * viewpoint — the entrance — and the check that this actually holds measures
+ * ride is turned to present its swing plane broadside to the MIDDLE of the
+ * park, which is the side every visitor sees it from now that the ring path
+ * runs inside it — and the check that this actually holds measures
  * the angle between the swing direction and the line of sight rather than
  * trusting the trigonometry here.
  *
@@ -39,11 +41,7 @@ export const RIDE_CENTER: [number, number] = rideById(UFO_RIDE_ID).center;
  * (cos alpha, -sin alpha) in world x/z. Setting that equal to the left-hand
  * perpendicular of the view direction gives the angle below.
  */
-const toRideX = RIDE_CENTER[0] - MAIN_VIEWPOINT[0];
-const toRideZ = RIDE_CENTER[1] - MAIN_VIEWPOINT[1];
-const toRideLength = Math.hypot(toRideX, toRideZ) || 1;
-
-export const RIDE_FACING = Math.atan2(-toRideX / toRideLength, -toRideZ / toRideLength);
+export const RIDE_FACING = facingCenter(RIDE_CENTER);
 
 /** The ride's origin as an R3F position triple. */
 export const RIDE_ORIGIN: [number, number, number] = [RIDE_CENTER[0], 0, RIDE_CENTER[1]];

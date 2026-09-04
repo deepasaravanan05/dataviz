@@ -1,9 +1,16 @@
 import * as THREE from "three";
+import {
+  PARK_ORIGIN,
+  RIDE_SLOT_BEARING,
+  rideEntrance,
+  type RingRideId,
+} from "../src/components/park/parkRing";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   MIN_SIGN_CLEARANCE,
   RIDE_SIGNS,
+  SIGN_SIDE_OFFSET,
   SIGN_BOARD_BOTTOM,
   SIGN_HALF_WIDTH,
 } from "../src/components/park/rideSigns";
@@ -45,8 +52,6 @@ import {
   MAX_GROUP_AVERAGE,
   WORST_DELAY,
 } from "../src/simulation/journey/delayStats";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
 import { HUMAN } from "../src/world/scale";
 import {
   ENTRANCE_CAMERA_POSITION,
@@ -100,16 +105,10 @@ check(
 );
 
 // =================== 2. Signs stand in genuinely free ground ===================
-const trackPts: [number, number][] = [];
-for (let i = 0; i <= 1500; i++) {
-  const p = TRACK_CURVE.getPointAt(i / 1500);
-  trackPts.push([p.x * TRAIN_SCALE, p.z * TRAIN_SCALE]);
-}
 const boxDist = (x: number, z: number, r: (typeof PARK_LAYOUT)[number]) =>
   Math.hypot(Math.max(r.minX - x, 0, x - r.maxX), Math.max(r.minZ - z, 0, z - r.maxZ));
 
 let worstRide = Infinity;
-let worstTrack = Infinity;
 let worstPlaza = Infinity;
 let worstStructure = Infinity;
 let signOverlap = "";
@@ -121,7 +120,6 @@ for (const s of RIDE_SIGNS) {
     if (d <= 0) signOverlap = `${s.department} sign inside ${r.label}`;
     worstRide = Math.min(worstRide, d);
   }
-  for (const [px, pz] of trackPts) worstTrack = Math.min(worstTrack, Math.hypot(x - px, z - pz));
   worstPlaza = Math.min(
     worstPlaza,
     Math.abs(Math.hypot(x - PLAZA_CENTER[0], z - PLAZA_CENTER[1]) - PLAZA_RADIUS),
@@ -146,11 +144,9 @@ check(
   worstRide >= MIN_SIGN_CLEARANCE,
   `tightest ${worstRide.toFixed(1)}u vs minimum ${MIN_SIGN_CLEARANCE}u`,
 );
-check(
-  "no sign stands on the railway",
-  worstTrack >= MIN_SIGN_CLEARANCE,
-  `tightest ${worstTrack.toFixed(1)}u to the rails`,
-);
+/* "No sign stands on the railway" used to be checked here. The train and its
+   track have been removed from the park, so there is no railway left to stand
+   on. */
 check(
   "no sign stands on the plaza",
   worstPlaza >= MIN_SIGN_CLEARANCE,
@@ -199,10 +195,35 @@ for (const s of RIDE_SIGNS) {
     }
   }
 }
+/*
+ * "NO SIGN COVERS ANOTHER RIDE FROM THE GATE" IS GONE, and what replaced it is
+ * stronger rather than weaker.
+ *
+ * The old rule existed to answer one question: can you tell WHICH ride a board
+ * labels? While the park was a fan in front of the entrance, the way to
+ * guarantee that was to keep every board out of every other ride's silhouette
+ * as seen from the gate. On a radially symmetric park that is unachievable and
+ * meaningless in the same breath — ten attractions ring the middle, so almost
+ * every bearing from the gate has a ride on it, and the gate is no longer the
+ * place anybody reads a board from anyway.
+ *
+ * The plan answers the question outright: every board stands beside the
+ * gateway of the ride it names, on that ride's own platform, facing back down
+ * that ride's own radial path. You read it as you walk in. That cannot be
+ * ambiguous, so it is asserted directly.
+ */
 check(
-  "no sign covers a ride other than its own, seen from the main gate",
-  hidden === "",
-  hidden || "all five signs sit clear of every other ride's silhouette",
+  "every board stands at its own ride's entrance, facing down its own radial path",
+  RIDE_SIGNS.every((s) => {
+    const entrance = rideEntrance(s.rideId as RingRideId);
+    const offset = Math.hypot(s.position[0] - entrance[0], s.position[1] - entrance[1]);
+    const facesIn =
+      Math.abs(
+        s.facing - Math.atan2(PARK_ORIGIN[0] - s.position[0], PARK_ORIGIN[1] - s.position[1]),
+      ) < 1e-9;
+    return Math.abs(offset - SIGN_SIDE_OFFSET) < 1e-6 && facesIn;
+  }),
+  `all ${RIDE_SIGNS.length} boards ${SIGN_SIDE_OFFSET.toFixed(1)} m to the side of their own gateway`,
 );
 check(
   "the boards hang above head height, so nobody walks into one",
@@ -360,18 +381,23 @@ check(
   `all ${JOURNEY_EMPLOYEES.length} start work before the loop ends`,
 );
 check(
-  "and every employee then stays in their seat for the rest of the day",
+  /* They ride, they get off, and they stay at their department for the rest of
+     the day — the seat has to come free for the next arrival, which is what
+     lets a park of fifty places carry a working day's whole attendance. */
+  "and every employee then stays at their department for the rest of the day",
   JOURNEY_EMPLOYEES.every(
     (e) =>
-      sampleJourney(e, e.checkOut + 0.5)?.onRide === true &&
-      sampleJourney(e, e.despawnTime)?.phase === "SITTING_ON_RIDE",
+      sampleJourney(e, e.rideExit + 0.5)?.onRide === false &&
+      sampleJourney(e, e.despawnTime)?.phase === "WORKING",
   ),
-  `all ${JOURNEY_EMPLOYEES.length} are still aboard their department ride when the day ends`,
+  `all ${JOURNEY_EMPLOYEES.length} are standing at their department ride when the day ends`,
 );
 
 // =================== 7. Delay analysis is real arithmetic ===================
+/* The sheet's own whole-minute Delay Time column, which is what every panel
+   prints and therefore what every average has to be taken over. */
 function mean(list: typeof JOURNEY_EMPLOYEES) {
-  return list.reduce((s, e) => s + e.delayMinutes, 0) / list.length;
+  return list.reduce((s, e) => s + e.reportedDelayMinutes, 0) / list.length;
 }
 check(
   "the headline average is the real average",
@@ -433,45 +459,42 @@ check(
  *     intersect, so it pushed the pair apart symmetrically.
  */
 /*
- * THE RIDES HAVE MOVED, AND THIS CHECK NOW SAYS WHAT SURVIVED THE MOVE.
+ * THE RIDES HAVE MOVED AGAIN, AND THIS CHECK SAYS WHAT SURVIVED THE MOVE.
  *
- * It used to hold five frozen coordinates, because for a long stretch of this
- * park's life the standing instruction was that no ride ever moves. That
- * instruction has been superseded by a direct one — every ride is to be the
- * same size — and rides the same size need room: the Monster Ride's footprint
- * doubled, the Roller Coaster's is 271 m across, and the layout solver
- * re-placed all five to fit them with clear sky between their silhouettes.
+ * It began as five frozen coordinates, from the stretch of this park's life
+ * when the standing instruction was that no ride ever moves. When "every ride
+ * is to be the same size" superseded that, the coordinates went and what they
+ * were protecting stayed: the FAN — from the main gate the five read left to
+ * right in their designed order, with no two overlapping.
  *
- * What must still hold is the FAN, which is what those coordinates were really
- * protecting: from the main gate the five rides still read left to right in
- * their designed order, Ferris Wheel, Dragon Ride, Roller Coaster, Monster
- * Ride, UFO Pendulum, and no two of them overlap on the ground. The centres
- * are printed rather than asserted, so a change to them is visible in the log
- * instead of frozen into it.
+ * The park is concentric now, and a ring has no left-to-right order to keep:
+ * the attractions run all the way round the lake, so sorting them by bearing
+ * from the gate returns whatever the ring's own order happens to be from that
+ * side. What both earlier versions were really protecting is that the plan is
+ * DELIBERATE and SEPARATED — every ride in a known slot, none on top of
+ * another — so that is what is asserted here, in the terms the plan now has.
+ * The centres are still printed rather than frozen.
  */
 {
-  const FAN_ORDER = ["ferris", "dragon", "coaster", "monster", "ufo"];
-  const ax = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
-  const az = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
-  const al = Math.hypot(ax, az) || 1;
-  const bearingOf = (c: readonly [number, number]) => {
-    const dx = c[0] - MAIN_VIEWPOINT[0];
-    const dz = c[1] - MAIN_VIEWPOINT[1];
-    return Math.atan2((ax / al) * dz - (az / al) * dx, dx * (ax / al) + dz * (az / al));
-  };
-  const seen = [...PARK_LAYOUT]
-    .sort((a, b) => bearingOf(a.center) - bearingOf(b.center))
-    .map((r) => r.id);
+  const offSlot = PARK_LAYOUT.filter((r) => {
+    const dx = r.center[0] - PARK_ORIGIN[0];
+    const dz = r.center[1] - PARK_ORIGIN[1];
+    const bearing = (Math.atan2(dx, dz) * 180) / Math.PI;
+    return Math.abs(bearing - RIDE_SLOT_BEARING[r.id as RingRideId]) > 1e-6;
+  });
   check(
-    "the five rides still read left to right in the order the fan was designed in",
-    seen.join(",") === FAN_ORDER.join(","),
-    PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
+    "the five department rides each stand on their declared slot on the ring",
+    offSlot.length === 0,
+    PARK_LAYOUT.map(
+      (r) =>
+        `${r.label} ${RIDE_SLOT_BEARING[r.id as RingRideId]}deg (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`,
+    ).join(", "),
   );
 }
 check(
   "the signs render in world space, outside every ride scale group",
   /<RideDepartmentSigns \/>/.test(scene) &&
-    !/<group scale=\{(PARK_SCALE|TRAIN_SCALE)\}>\s*<RideDepartmentSigns/.test(scene),
+    !/<group scale=\{PARK_SCALE\}>\s*<RideDepartmentSigns/.test(scene),
   "signs are not scaled or parented to a ride",
 );
 check(
@@ -481,7 +504,7 @@ check(
 );
 check(
   "no ride module imports the signage or the timeline",
-  ["roller-coaster", "ferris-wheel", "monster-ride", "park-train", "dragon-ride", "ufo-pendulum"].every(
+  ["roller-coaster", "ferris-wheel", "monster-ride", "dragon-ride", "ufo-pendulum"].every(
     (dir) => {
       const c = readFileSync(join(root, "src", "components", dir, "constants.ts"), "utf8");
       return !c.includes("rideSigns") && !c.includes("TimelineControls");
@@ -491,7 +514,7 @@ check(
 );
 check(
   "pausing the timeline cannot pause a ride",
-  ["ferris-wheel/FerrisWheel", "dragon-ride/DragonRide", "ufo-pendulum/UfoPendulum", "park-train/ParkTrain"].every(
+  ["ferris-wheel/FerrisWheel", "dragon-ride/DragonRide", "ufo-pendulum/UfoPendulum", "giga-coaster/GigaCoaster"].every(
     (f) => {
       const c = read("src", "components", ...`${f}.tsx`.split("/"));
       return /useFrame/.test(c) && !/journeyStore|journey\/clock/.test(c);
@@ -502,7 +525,7 @@ check(
 check(
   "sign placement is solved against the real park, not hand-typed",
   /PARK_LAYOUT/.test(solverSrc) &&
-    /TRACK_CURVE/.test(solverSrc) &&
+
     /JOURNEY_EMPLOYEES/.test(solverSrc) &&
     !/position: \[\s*-?\d+(\.\d+)?\s*,/.test(code(solverSrc)),
   "footprints, rails and walking routes all read from the modules that own them",

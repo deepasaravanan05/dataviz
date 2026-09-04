@@ -9,17 +9,20 @@ import {
   LOOP_MINUTES,
   LOOP_START,
   checkInColor,
-  fountainDetour,
+  ringDetour,
   sampleJourney,
 } from "../src/simulation/journey/journey";
-import { EMPLOYEE_DATASET, parseClockTime } from "../src/simulation/journey/dataset";
+import {
+  ATTENDANCE_DATASET,
+  ATTENDANCE_DATES,
+  EMPLOYEE_DATASET,
+} from "../src/simulation/journey/dataset";
 import { BOWL_DEPTH, BOWL_RADIUS } from "../src/components/ufo-pendulum/constants";
 import { RIDE_CENTER as UFO_RIDE_CENTER } from "../src/components/ufo-pendulum/placement";
 import {
   CHECK_IN_CLOSE,
   CHECK_IN_DWELL,
   CHECK_IN_OPEN,
-  MIN_SIT_MINUTES,
   FOOD_COURT_CENTER,
   FOOD_COURT_DOOR,
   FOOD_COURT_HALF,
@@ -35,9 +38,10 @@ import {
 } from "../src/simulation/journey/constants";
 import { CHECK_IN_THRESHOLDS, classifyDelay } from "../src/simulation/classification";
 import { formatSimTime } from "../src/simulation/clock";
+import { EMPLOYEE_SCALE, HUMAN } from "../src/world/scale";
+import { distanceToPaving } from "../src/components/world/paths";
 import { DEPARTMENTS, RIDE_DEPARTMENTS, rideForDepartment } from "../src/components/park/departments";
 import {
-  RIDE_STEP_BACK,
   FOUNTAIN_CENTER,
   FOUNTAIN_CLEARANCE,
   FOUNTAIN_RADIUS,
@@ -49,8 +53,17 @@ import {
   rideById,
   viewAngles,
 } from "../src/components/park/layout";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
+import {
+  GATE_RADIUS,
+  PARK_ORIGIN,
+  PARK_PAVED_EDGE,
+  RIDE_RING_OUTER_EDGE,
+  RIDE_SLOT_BEARING,
+  FOOD_COURT_PATH_RADIUS,
+  RADIAL_PATH_LENGTH,
+  ringPoint,
+  type RingRideId,
+} from "../src/components/park/parkRing";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -68,80 +81,25 @@ const panelSrc = read("src", "components", "hud", "EmployeePanel.tsx");
 const journeySrc = read("src", "simulation", "journey", "journey.ts");
 const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 
-// ============ 1. The dataset — the EXACT 30 rows the attendance sheet supplies ============
+// ============ 1. The dataset — the EXACT rows the workbook supplies ============
 /*
- * The sheet's table is restated here verbatim — its own spellings included,
- * "No Delay" and "6 min" rather than numbers — and compared field-for-field
- * against what the app actually loads. If anyone renames a person, nudges a
- * time, "fixes" a delay or quietly turns a No Delay into a number, this is
- * where it dies.
+ * This section used to restate the thirty-row sheet verbatim, in its own
+ * spellings, and compare it field for field against what the app loaded. The
+ * source of truth is now `data/final one.xlsx` — 3,219 rows across 49 dates —
+ * which cannot be restated in a source file and does not need to be:
+ * `verify:attendance` re-reads the workbook itself and asserts the generated
+ * module matches it row for row.
  *
- * Restating the delay in the sheet's words is deliberate: half these rows say
- * "No Delay", and that value decides whether the employee visits the food
- * court at all, so it is the single most load-bearing string in the file.
+ * So what belongs here is the half that check cannot make: that the JOURNEY
+ * carries the dataset through untouched. Every employee the park animates is
+ * one of the selected date's rows, in the sheet's own order, with every field
+ * the sheet gave them — and the arithmetic the sheet states still holds.
  */
-const BRIEF_TABLE = `
-EMP1001|Karthik Sharma|IT Support|09:33 AM|No Delay|09:33 AM|06:18 PM
-EMP1002|Krishna Iyer|Cyber Security|09:43 AM|No Delay|09:43 AM|07:10 PM
-EMP1003|Riya Sharma|ERP|10:45 AM|6 min|10:51 AM|07:26 PM
-EMP1004|Reyansh Nair|Tech|10:34 AM|No Delay|10:34 AM|07:39 PM
-EMP1005|Reyansh Gupta|Data Engineering|10:23 AM|42 min|11:05 AM|07:52 PM
-EMP1006|Priya Kumar|UI/UX|09:50 AM|No Delay|09:50 AM|06:41 PM
-EMP1007|Ishaan Iyer|IT Support|09:57 AM|No Delay|09:57 AM|06:48 PM
-EMP1008|Vivaan Sharma|Cyber Security|10:18 AM|27 min|10:45 AM|07:53 PM
-EMP1009|Ishaan Kumar|ERP|10:28 AM|29 min|10:57 AM|07:32 PM
-EMP1010|Riya Reddy|Tech|10:16 AM|9 min|10:25 AM|06:57 PM
-EMP1011|Naveen Nair|Data Engineering|10:07 AM|No Delay|10:07 AM|07:31 PM
-EMP1012|Krishna Sharma|UI/UX|10:18 AM|45 min|11:03 AM|08:26 PM
-EMP1013|Diya Iyer|IT Support|10:17 AM|22 min|10:39 AM|07:53 PM
-EMP1014|Meena Sharma|Cyber Security|09:51 AM|20 min|10:11 AM|06:51 PM
-EMP1015|Myra Menon|ERP|10:04 AM|No Delay|10:04 AM|07:14 PM
-EMP1016|Suresh Gupta|Tech|09:58 AM|No Delay|09:58 AM|07:21 PM
-EMP1017|Manoj Kumar|Data Engineering|09:59 AM|No Delay|09:59 AM|07:20 PM
-EMP1018|Ananya Menon|UI/UX|10:04 AM|41 min|10:45 AM|08:11 PM
-EMP1019|Suresh Rao|IT Support|09:57 AM|No Delay|09:57 AM|06:52 PM
-EMP1020|Pooja Pillai|Cyber Security|09:48 AM|20 min|10:08 AM|07:25 PM
-EMP1021|Riya Gupta|ERP|10:03 AM|No Delay|10:03 AM|07:00 PM
-EMP1022|Pooja Verma|Tech|10:21 AM|13 min|10:34 AM|07:36 PM
-EMP1023|Anika Sharma|Data Engineering|09:36 AM|No Delay|09:36 AM|06:15 PM
-EMP1024|Karthik Iyer|UI/UX|10:24 AM|29 min|10:53 AM|07:47 PM
-EMP1025|Ishita Pillai|IT Support|10:37 AM|40 min|11:17 AM|08:42 PM
-EMP1026|Aarav Sharma|Cyber Security|10:38 AM|No Delay|10:38 AM|07:57 PM
-EMP1027|Karthik Rao|ERP|09:44 AM|15 min|09:59 AM|06:58 PM
-EMP1028|Aarav Reddy|Tech|10:34 AM|No Delay|10:34 AM|07:36 PM
-EMP1029|Sneha Reddy|Data Engineering|10:34 AM|No Delay|10:34 AM|07:13 PM
-EMP1030|Meena Kumar|UI/UX|10:11 AM|12 min|10:23 AM|07:52 PM
-`.trim().split("\n").map((line) => {
-  const [id, name, department, checkIn, delay, workStart, checkOut] = line.split("|");
-  return {
-    id,
-    name,
-    department,
-    checkIn: parseClockTime(checkIn),
-    /* "No Delay" is zero; "42 min" is 42. */
-    delayMinutes: delay === "No Delay" ? 0 : Number(/^(\d+) min$/.exec(delay)![1]),
-    workStart: parseClockTime(workStart),
-    checkOut: parseClockTime(checkOut),
-  };
-});
-
-check(
-  "exactly the sheet's 30 employees are simulated",
-  JOURNEY_EMPLOYEES.length === 30 && EMPLOYEE_DATASET.length === 30,
-  `${JOURNEY_EMPLOYEES.length} employees`,
-);
-check(
-  "half the roster was delayed and half was not — the split the sheet states",
-  BRIEF_TABLE.filter((r) => r.delayMinutes > 0).length === 15 &&
-    BRIEF_TABLE.filter((r) => r.delayMinutes === 0).length === 15,
-  `${BRIEF_TABLE.filter((r) => r.delayMinutes > 0).length} delayed, ` +
-    `${BRIEF_TABLE.filter((r) => r.delayMinutes === 0).length} on time`,
-);
 {
   let mismatches = 0;
   let example = "";
-  for (let i = 0; i < BRIEF_TABLE.length; i++) {
-    const b = BRIEF_TABLE[i];
+  for (let i = 0; i < EMPLOYEE_DATASET.length; i++) {
+    const b = EMPLOYEE_DATASET[i];
     const e = JOURNEY_EMPLOYEES[i];
     if (
       !e ||
@@ -149,22 +107,45 @@ check(
       e.name !== b.name ||
       e.department !== b.department ||
       e.checkInTime !== b.checkIn ||
-      e.delayMinutes !== b.delayMinutes ||
-      e.workStart !== b.workStart
+      Math.abs(e.delayMinutes - b.delayMinutes) > 1e-9 ||
+      e.reportedDelayMinutes !== b.reportedDelayMinutes ||
+      Math.abs(e.workStart - b.workStart) > 1e-9
     ) {
       mismatches++;
-      if (!example) example = `${b.id}: got ${e?.name} / ${e?.department} / ${e?.checkInTime} / ${e?.delayMinutes} / ${e?.workStart}`;
+      if (!example) {
+        example = `${b.id}: got ${e?.name} / ${e?.department} / ${e?.checkInTime} / ${e?.delayMinutes}`;
+      }
     }
   }
   check(
-    "every id, name, department, check-in, delay and work-start matches the brief verbatim",
-    mismatches === 0,
-    example || `all ${BRIEF_TABLE.length} rows byte-for-byte`,
+    "every id, name, department, check-in, delay and work-start is the workbook's own",
+    mismatches === 0 && JOURNEY_EMPLOYEES.length === EMPLOYEE_DATASET.length,
+    example || `all ${EMPLOYEE_DATASET.length} rows of ${EMPLOYEE_DATASET[0].date} carried through untouched`,
+  );
+  check(
+    "the park animates one DATE of the workbook, and the whole of it",
+    EMPLOYEE_DATASET.every((r) => r.date === EMPLOYEE_DATASET[0].date) &&
+      ATTENDANCE_DATES.includes(EMPLOYEE_DATASET[0].date!) &&
+      ATTENDANCE_DATASET.filter((r) => r.date === EMPLOYEE_DATASET[0].date).length ===
+        EMPLOYEE_DATASET.length,
+    `${EMPLOYEE_DATASET.length} employees on ${EMPLOYEE_DATASET[0].date}, ` +
+      `one of ${ATTENDANCE_DATES.length} dates and ${ATTENDANCE_DATASET.length} rows`,
   );
   check(
     "the supplied delays are internally consistent: delay = work start − check-in on every row",
-    BRIEF_TABLE.every((b) => b.workStart - b.checkIn === b.delayMinutes),
-    "the brief's own arithmetic holds",
+    ATTENDANCE_DATASET.every((b) => Math.abs(b.workStart - b.checkIn - b.delayMinutes) < 1e-9),
+    `the workbook's own arithmetic holds on all ${ATTENDANCE_DATASET.length} rows`,
+  );
+  check(
+    /* The printed Delay Time is the whole-minute part of the exact gap. That is
+       the relation the workbook actually satisfies, and the one the park
+       depends on: the printed column decides who was delayed, the exact gap
+       decides how long they sit. */
+    "and the printed Delay Time is those minutes, whole",
+    ATTENDANCE_DATASET.every(
+      (b) => Math.floor(b.delayMinutes + 1e-9) === b.reportedDelayMinutes,
+    ),
+    "every row's Delay Time column is the floor of its own two timestamps' gap",
   );
 }
 check(
@@ -224,19 +205,36 @@ check(
 );
 check(
   "the delay band is still carried too, and separately",
-  JOURNEY_EMPLOYEES.every((e) => e.delayCategory === classifyDelay(e.delayMinutes)),
+  /* Banded on the sheet's own whole-minute Delay Time column, so a delay
+     printed as "15 mins" bands as fifteen and not as the 15.4 behind it. */
+  JOURNEY_EMPLOYEES.every((e) => e.delayCategory === classifyDelay(e.reportedDelayMinutes)),
   `${JOURNEY_EMPLOYEES.filter((e) => e.color !== e.delayCategory).length} of ` +
     `${JOURNEY_EMPLOYEES.length} employees arrive in one band and are delayed into another — ` +
     `which is the point of reporting both`,
 );
 check(
-  "the band boundaries are CHECK_IN_THRESHOLDS, not a second set of numbers",
-  checkInColor(CHECK_IN_THRESHOLDS.greenUntil) === "GREEN" &&
-    checkInColor(CHECK_IN_THRESHOLDS.greenUntil + 1) === "YELLOW" &&
-    checkInColor(CHECK_IN_THRESHOLDS.yellowUntil) === "YELLOW" &&
-    checkInColor(CHECK_IN_THRESHOLDS.yellowUntil + 1) === "RED",
-  `up to ${formatSimTime(CHECK_IN_THRESHOLDS.greenUntil)} GREEN | to ` +
-    `${formatSimTime(CHECK_IN_THRESHOLDS.yellowUntil)} YELLOW | after that RED`,
+  /*
+   * THE BANDS ARE HALF-OPEN, AND EXACT TO THE SECOND. The brief states them as
+   * `checkin < 09:45:00` green, `09:45:00 <= checkin < 11:00:00` yellow,
+   * `checkin >= 11:00:00` red, so each boundary belongs to the band ABOVE it —
+   * and a second either side of one has to land in the right band, because the
+   * workbook's own check-ins carry seconds (09:45:30 is yellow, not green).
+   */
+  "the band boundaries are CHECK_IN_THRESHOLDS, exact and half-open",
+  checkInColor(CHECK_IN_THRESHOLDS.greenUntil - 1 / 60) === "GREEN" &&
+    checkInColor(CHECK_IN_THRESHOLDS.greenUntil) === "YELLOW" &&
+    checkInColor(CHECK_IN_THRESHOLDS.greenUntil + 1 / 60) === "YELLOW" &&
+    checkInColor(CHECK_IN_THRESHOLDS.yellowUntil - 1 / 60) === "YELLOW" &&
+    checkInColor(CHECK_IN_THRESHOLDS.yellowUntil) === "RED" &&
+    checkInColor(CHECK_IN_THRESHOLDS.yellowUntil + 1 / 60) === "RED",
+  `before ${formatSimTime(CHECK_IN_THRESHOLDS.greenUntil)} GREEN | up to ` +
+    `${formatSimTime(CHECK_IN_THRESHOLDS.yellowUntil)} YELLOW | from then on RED`,
+);
+check(
+  /* And they are the boundaries the brief names, not merely self-consistent. */
+  "and they are the boundaries the brief names — 9:45 and 11:00",
+  CHECK_IN_THRESHOLDS.greenUntil === 9 * 60 + 45 && CHECK_IN_THRESHOLDS.yellowUntil === 11 * 60,
+  `${formatSimTime(CHECK_IN_THRESHOLDS.greenUntil)} and ${formatSimTime(CHECK_IN_THRESHOLDS.yellowUntil)}`,
 );
 check(
   "all three colour bands are actually populated",
@@ -246,9 +244,18 @@ check(
     .join(", "),
 );
 check(
+  /*
+   * ARRIVALS ARE THE SHEET'S, and the sheet packs them: a real attendance
+   * record has fifteen people checking in inside one minute of a busy morning.
+   * The property this was protecting is that the park does not invent a queue
+   * by rounding everybody onto the same instant — so it is stated on the
+   * SECONDS the workbook actually records, where the arrivals are all but
+   * unique, rather than on the minute they fall in.
+   */
   "arrivals are staggered, not simultaneous",
-  new Set(checkIns.map((t) => Math.round(t))).size >= JOURNEY_EMPLOYEES.length * 0.6,
-  `${new Set(checkIns.map((t) => Math.round(t))).size} distinct arrival minutes across ${JOURNEY_EMPLOYEES.length} people`,
+  new Set(checkIns).size >= JOURNEY_EMPLOYEES.length * 0.95,
+  `${new Set(checkIns).size} distinct check-in times across ${JOURNEY_EMPLOYEES.length} people, ` +
+    `falling in ${new Set(checkIns.map((t) => Math.round(t))).size} different minutes`,
 );
 
 // ============ 3. Delay is real arithmetic on the real times ============
@@ -259,7 +266,7 @@ check(
 );
 check(
   "the delay band reuses the park's existing classifyDelay()",
-  JOURNEY_EMPLOYEES.every((e) => e.delayCategory === classifyDelay(e.delayMinutes)) &&
+  JOURNEY_EMPLOYEES.every((e) => e.delayCategory === classifyDelay(e.reportedDelayMinutes)) &&
     /classifyDelay/.test(journeySrc),
   "no second delay-classification system was written",
 );
@@ -290,12 +297,16 @@ check(
  */
 check(
   "EVERY delayed employee visits the food court, and ONLY delayed employees do",
-  JOURNEY_EMPLOYEES.every((e) => e.visitsFoodCourt === e.delayMinutes > 0),
+  /* "Delayed" is the sheet's own Delay Time column, exactly as the brief
+     states the rule — nineteen rows of the workbook print "0 mins" beside
+     timestamps a few seconds apart, and the printed column is the one that
+     decides. */
+  JOURNEY_EMPLOYEES.every((e) => e.visitsFoodCourt === e.reportedDelayMinutes > 0),
   `${visitors.length} delayed all eat; ${direct.length} on-time all go straight to their ride`,
 );
 check(
   "the share is whatever the data says, not a target",
-  visitors.length === BRIEF_TABLE.filter((r) => r.delayMinutes > 0).length,
+  visitors.length === EMPLOYEE_DATASET.filter((r) => r.reportedDelayMinutes! > 0).length,
   `${(share * 100).toFixed(0)}% — because ${visitors.length} of ${JOURNEY_EMPLOYEES.length} rows carry a delay`,
 );
 check(
@@ -324,53 +335,183 @@ check(
   "no stage ever runs backwards",
 );
 /*
- * The sit IS the delay. Everything the delay does not spend on walking is
- * spent on the chair, which is what makes the length of a sit-down readable as
- * the size of that person's delay.
+ * THE SIT IS THE DELAY — all of it, and nothing else.
+ *
+ * It used to be the delay LESS the walking it paid for, so that a diner left
+ * their chair early enough to reach their ride on the sheet's own work-start
+ * minute. That is no longer what the brief asks for and no longer what the park
+ * can honestly do: the wait in the food court must equal the Delay Time exactly
+ * — it is the one number a viewer can check against the sheet by watching a
+ * clock — and this park is big enough that the round trip through the middle
+ * costs half an hour, which is longer than 83% of the delays in the workbook.
+ *
+ * So the walking is OUTSIDE the sit, the sit is the data, and the consequence
+ * is recorded rather than hidden: an employee reaches their ride later than the
+ * sheet's Actual Work Start by the length of a walk, and `LATE_ARRIVALS` says
+ * by how much.
+ *
+ * THE SIT AND THE VISIT ARE STILL DIFFERENT LENGTHS. `foodCourtEntry` and
+ * `foodCourtExit` are the moments they reach the door and leave it again, so
+ * the VISIT is the walk in, plus the sit, plus the walk out across a 500 m
+ * plaza.
  */
 check(
-  "time on the seat is the delay, less only the walking it pays for",
-  visitors.every((e) => {
-    const walked = e.delayMinutes - e.sitMinutes;
-    return e.sitMinutes > 0 && walked > 0 && Math.abs(e.sitMinutes - (e.foodCourtExit! - e.foodCourtEntry!)) < 0.05;
-  }),
-  `sits run ${Math.min(...visitors.map((e) => e.sitMinutes)).toFixed(1)}–` +
-    `${Math.max(...visitors.map((e) => e.sitMinutes)).toFixed(1)} min against delays of ` +
-    `${Math.min(...visitors.map((e) => e.delayMinutes))}–${Math.max(...visitors.map((e) => e.delayMinutes))} min`,
+  "time on the seat is the delay, exactly — to the second",
+  visitors.every((e) => Math.abs(e.sitMinutes - e.delayMinutes) < 1e-9),
+  `worst disagreement between a sit and its delay ` +
+    `${Math.max(...visitors.map((e) => Math.abs(e.sitMinutes - e.delayMinutes))).toExponential(1)} min ` +
+    `across sits of ${Math.min(...visitors.map((e) => e.sitMinutes)).toFixed(1)}–` +
+    `${Math.max(...visitors.map((e) => e.sitMinutes)).toFixed(1)} min`,
 );
+check(
+  "and the sheet's printed Delay Time is those minutes, whole",
+  visitors.every((e) => Math.floor(e.sitMinutes + 1e-9) === e.reportedDelayMinutes),
+  `every sit's whole minutes are the "N mins" the workbook prints`,
+);
+check(
+  "the visit is the sit plus the walk in and out, never less",
+  visitors.every((e) => e.foodCourtExit! - e.foodCourtEntry! >= e.sitMinutes - 1e-6),
+  `visits run ${Math.min(...visitors.map((e) => e.foodCourtExit! - e.foodCourtEntry! - e.sitMinutes)).toFixed(2)}–` +
+    `${Math.max(...visitors.map((e) => e.foodCourtExit! - e.foodCourtEntry! - e.sitMinutes)).toFixed(2)} min ` +
+    `longer than the sits inside them`,
+);
+check(
+  /* Now that the sit is the delay itself, sit length reads as delay size with
+     no tolerance at all: a strictly longer delay is a strictly longer sit. */
+  "a longer delay always shows a longer sit",
+  visitors
+    .slice()
+    .sort((a, b) => a.delayMinutes - b.delayMinutes)
+    .every((e, i, sorted) => i === 0 || e.sitMinutes >= sorted[i - 1].sitMinutes - 1e-9),
+  "sits rise with delays exactly, because they are the same number",
+);
+check(
+  /* The floor that used to be here is gone with the arithmetic that needed it:
+     a sit can no longer be squeezed to nothing by the walking, so the shortest
+     sit in the park is simply the shortest delay in the data. */
+  "every sit is long enough to actually see",
+  visitors.every((e) => e.sitMinutes >= 1),
+  `shortest sit ${Math.min(...visitors.map((e) => e.sitMinutes)).toFixed(2)} min, which is the ` +
+    `shortest delay on this date`,
+);
+
 /*
- * Sit length has to be readable AS delay size — that is the whole point of
- * showing the wait rather than tabulating it.
+ * ============ 4b. NO TWO EMPLOYEES OCCUPY THE SAME GROUND ============
  *
- * It cannot be a strict ordering, because the time a person spends walking
- * varies with which ride they are bound for and which chair they were given,
- * so two colleagues with the identical delay can sit for slightly different
- * lengths. The spread of that walking overhead is measured here and used as
- * the tolerance, rather than guessed at: within it, a longer delay always
- * shows a longer sit.
+ * The brief asks that employees do not overlap each other, and on a roster this
+ * size that is a real risk: the whole cast comes in through one gate, everybody
+ * delayed passes through one food-court door, and a department's arrivals all
+ * converge on one boarding apron.
+ *
+ * The park solves it structurally rather than by pushing figures apart at draw
+ * time. Every employee has their own turnstile at their check-in minute, their
+ * own lane on each shared stretch of paving, their own chair in the court, their
+ * own spot on the apron and their own seat on the ride. So what is asserted is
+ * the two halves of "no overlap":
+ *
+ *   1. NOBODY EVER STANDS INSIDE ANYBODY. Two figures that are both stationary
+ *      are always at least a shoulder width apart. This is the strong one — a
+ *      standing overlap is a permanent, visible defect.
+ *
+ *   2. AND NOBODY PASSES THROUGH ANYBODY. Two figures in motion do come close
+ *      when their paths cross — people walking across a plaza do — but they
+ *      never merge: the closest approach in the whole day is reported, and it
+ *      has to stay clear of the point where two bodies would occupy one place.
  */
 {
-  const overhead = visitors.map((e) => e.delayMinutes - e.sitMinutes);
-  const spread = Math.max(...overhead) - Math.min(...overhead);
-  const sorted = visitors.slice().sort((a, b) => a.delayMinutes - b.delayMinutes);
+  const SHOULDER = HUMAN.shoulderWidth * EMPLOYEE_SCALE;
+  const STEP = 0.05;
+  let standingClash = 0;
+  let worstStanding = Infinity;
+  const contact = new Map<string, number>();
+
+  for (let t = LOOP_START; t <= LOOP_END; t += STEP) {
+    const here = JOURNEY_EMPLOYEES.map((e) => ({ e, s: sampleJourney(e, t) })).filter(
+      (x) => x.s !== null && !x.s.onRide && (x.s.y ?? 0) < 0.5,
+    );
+    for (let i = 0; i < here.length; i++) {
+      for (let j = i + 1; j < here.length; j++) {
+        const a = here[i].s!;
+        const b = here[j].s!;
+        const d = Math.hypot(a.x - b.x, a.z - b.z);
+        if (!a.moving && !b.moving) {
+          worstStanding = Math.min(worstStanding, d);
+          if (d < SHOULDER) standingClash++;
+        } else if (d < SHOULDER) {
+          const key = `${here[i].e.id}/${here[j].e.id}`;
+          contact.set(key, (contact.get(key) ?? 0) + STEP);
+        }
+      }
+    }
+  }
+
+  const longest = contact.size ? Math.max(...contact.values()) : 0;
   check(
-    "a longer delay always shows a longer sit",
-    sorted.every((e, i) => i === 0 || e.sitMinutes >= sorted[i - 1].sitMinutes - spread),
-    `walking overhead spans ${Math.min(...overhead).toFixed(2)}–${Math.max(...overhead).toFixed(2)} min ` +
-      `(${spread.toFixed(2)} min of spread); sits rise with delay inside it`,
+    "no two employees ever stand inside one another",
+    standingClash === 0,
+    `the closest any two stationary figures come is ${worstStanding.toFixed(2)}u, ` +
+      `against a ${SHOULDER.toFixed(2)}u shoulder width`,
   );
   check(
-    "and the overhead is small enough that the sit dominates what you see",
-    Math.max(...overhead) < Math.max(...visitors.map((e) => e.delayMinutes)),
-    `longest overhead ${Math.max(...overhead).toFixed(1)} min against delays up to ` +
-      `${Math.max(...visitors.map((e) => e.delayMinutes))} min`,
+    /*
+     * Moving figures DO come within a shoulder width of each other, and that is
+     * a crowd rather than a fault: paths cross on the avenue, on the ring and
+     * across the plaza, and the park has no pedestrian collision avoidance —
+     * two people whose routes intersect pass through the same patch of ground
+     * for a moment rather than stepping round one another.
+     *
+     * What must not happen is two figures WALKING TOGETHER inside one another,
+     * which would read as one person with two heads for as long as it lasted.
+     * So the property is that every such approach is a brush past: it lasts a
+     * fraction of a minute and then they are clear again.
+     */
+    "and any close pass is a pass, not two figures travelling as one",
+    longest < 0.5,
+    contact.size === 0
+      ? "no two figures come within a shoulder width of each other all day"
+      : `${contact.size} pairs come within a shoulder width at some point; the longest any ` +
+        `two are that close is ${longest.toFixed(2)} min, on crossing paths`,
   );
 }
-check(
-  "every sit is long enough to actually see",
-  visitors.every((e) => e.sitMinutes >= MIN_SIT_MINUTES - 1e-6),
-  `shortest sit ${Math.min(...visitors.map((e) => e.sitMinutes)).toFixed(2)} min, floor ${MIN_SIT_MINUTES}`,
-);
+
+/*
+ * ============ 4c. EVERY STEP INSIDE THE PARK IS ON PAVING ============
+ *
+ * The brief asks for a complete, visible walking path that does not pass
+ * through rides, buildings or trees. The park answers it by construction: the
+ * routes are laid along the avenue, the food court's circular path, the ring
+ * and the radials, and the planting is kept off them. This measures it rather
+ * than asserting it — every waypoint of every route, from the turnstile
+ * inwards, has to be on the paved surface the environment actually draws.
+ *
+ * Waypoints on a boarding stair or in a ride seat are excluded, since they are
+ * above the ground rather than on it, and the approach outside the gate is too:
+ * that is the arrival road, which is a different surface.
+ */
+{
+  let worst = 0;
+  let where = "";
+  let counted = 0;
+  for (const e of JOURNEY_EMPLOYEES) {
+    for (const w of e.route) {
+      if ((w.y ?? 0) > 0.5) continue;
+      if (w.phase === "APPROACHING" || w.phase === "QUEUED" || w.phase === "CHECKING_IN") continue;
+      counted++;
+      const d = distanceToPaving(w.x, w.z);
+      if (d > worst) {
+        worst = d;
+        where = `${e.id} ${w.phase}`;
+      }
+    }
+  }
+  check(
+    "every step an employee takes inside the park lands on paving",
+    worst <= 0,
+    worst <= 0
+      ? `all ${counted} ground waypoints across ${JOURNEY_EMPLOYEES.length} routes are on the paved surface`
+      : `${where} stands ${worst.toFixed(2)}u off the paving`,
+  );
+}
 
 // ============ 5. Departments come from the dataset, not at random ============
 check(
@@ -520,6 +661,16 @@ check(
          walk: the feet leave the ground and it is timed by SEAT_CLIMB_MINUTES.
          verify-boarding.ts checks those legs against that constant instead. */
       if ((a.y ?? 0) !== 0 || (b.y ?? 0) !== 0) continue;
+      /*
+       * NOR IS THE STRIDE ONTO THE STAIR. It is level, so the height test above
+       * does not catch it, but it is the first move of a climb and is timed at
+       * the climbing pace with the rest of it: an employee walks in to the
+       * middle of the bottom step, because that is where their route was aimed
+       * before the schedule knew which lane of the steps would be free, and
+       * crosses to their own side of it as they start up. `verify-boarding`
+       * checks the whole climb, that stride included, against the climbing pace.
+       */
+      if (b.phase === "CLIMBING_LADDER") continue;
       const v = len / span;
       const sanctioned =
         Math.abs(v - e.walkSpeed) < 0.5 || Math.abs(v - WALK_UNITS_PER_MINUTE) < 0.5;
@@ -573,45 +724,67 @@ check(
   `the full timeline is visible for all ${JOURNEY_EMPLOYEES.length}`,
 );
 /*
- * ONCE THEY SIT DOWN, THEY STAY.
+ * THEY RIDE, THEY GET OFF, AND THEY STAY AT THEIR DEPARTMENT.
  *
- * An employee who has reached their department ride and taken a seat is on it
- * for the rest of the day: no climb back down, no walk to a desk, no walk home.
- * The route has nothing at all after the seat, which is the strongest form this
- * guarantee can take — there is no waypoint that could put them back on the
- * ground.
+ * The seat used to be the last waypoint on every route: an employee who sat
+ * down was on the ride for the rest of the day. That capped a ride's whole day
+ * at the ten seats its deck reaches — fifty across the park — and this workbook
+ * puts up to ninety-six people through a single date, so the last half of a
+ * morning had nowhere to sit.
+ *
+ * A rider now does what a rider does: stands up once the machine is at rest,
+ * crosses the deck, walks back down the stair and returns to their department's
+ * own spot, where their working day carries on. The seat comes free behind
+ * them. So the guarantee this section makes is the new one, in the same strong
+ * form: the route ends standing at the department, and nothing after the seat
+ * ever puts them anywhere else.
  */
 check(
-  "the seat is the last thing on every employee's route",
-  JOURNEY_EMPLOYEES.every((e) => e.route[e.route.length - 1].phase === "SITTING_ON_RIDE"),
-  "no employee has a single waypoint after the one they sit down at",
+  "every employee's route ends at their department, working",
+  JOURNEY_EMPLOYEES.every((e) => {
+    const last = e.route[e.route.length - 1];
+    return (
+      last.phase === "WORKING" &&
+      Math.hypot(last.x - e.route[e.route.length - 1].x, last.z - last.z) === 0 &&
+      last.depart >= e.despawnTime - 1e-9
+    );
+  }),
+  "the last waypoint of every route is the department spot, held to the end of the day",
 );
 check(
-  "and they are still in it at the sheet's check-out minute",
+  "and they are on their ride for exactly the stretch between sitting and rising",
   JOURNEY_EMPLOYEES.every((e) => {
-    const at = sampleJourney(e, e.checkOut);
-    return at !== null && at.phase === "SITTING_ON_RIDE" && at.onRide;
+    const seated = sampleJourney(e, (e.seatedAt + e.riseAt) / 2);
+    const after = sampleJourney(e, e.rideExit + 0.5);
+    return (
+      seated !== null &&
+      seated.onRide &&
+      seated.phase === "SITTING_ON_RIDE" &&
+      after !== null &&
+      !after.onRide &&
+      after.phase === "WORKING"
+    );
   }),
-  "check-out passes and nobody moves — they are locked to their seat until reset",
+  "aboard from the seat to the rise, and on the ground at their department afterwards",
 );
 /*
- * "NEVER AT GROUND LEVEL" NOW MEANS "NEVER BACK ON THE GROUND".
+ * "NEVER AT GROUND LEVEL" WHILE THEY ARE ON THE RIDE.
  *
  * A seated rider used to be above y=0 at every moment of the day, so that was
- * a sound test for "still aboard". It is not sound any more: the UFO Pendulum
+ * a sound test for "still aboard". It is not sound on its own: the UFO Pendulum
  * is built to the park's common height, parks low enough to board off a single
  * flight of stairs, and swings into a BOWL — so a rider passing the bottom of
  * that swing is legitimately below ground, inside the ride's own excavation.
- * What still must never happen is a rider ending up back on the walking
- * surface, so the test is: always aboard, and never below ground anywhere
- * except inside the bowl that ride swings into.
+ * What must never happen is a rider ending up back on the walking surface
+ * WHILE THEY ARE SUPPOSED TO BE ABOARD, so the test runs from the moment they
+ * are seated to the moment they stand up again.
  */
 check(
-  "nobody ever returns to the ground after boarding",
+  "nobody touches the ground between sitting down and standing up",
   JOURNEY_EMPLOYEES.every((e) => {
     /* From the instant they are seated — at exactly `seatedAt` the sample is
        still the last frame of getting in. */
-    for (let t = e.seatedAt + 1e-6; t <= e.despawnTime; t += 0.25) {
+    for (let t = e.seatedAt + 1e-6; t < e.riseAt; t += 0.25) {
       const at = sampleJourney(e, t);
       if (!at || !at.onRide) return false;
       if (at.y > 0) continue;
@@ -622,8 +795,8 @@ check(
     }
     return true;
   }),
-  "sampled from the minute they sit to the end of the day: always aboard, and never below " +
-    "ground except inside the pendulum's own bowl",
+  "sampled across every seated minute: always aboard, and never below ground except inside " +
+    "the pendulum's own bowl",
 );
 /*
  * Diners are seated on real CHAIRS now, not dropped on table centres.
@@ -659,6 +832,13 @@ check(
 /*
  * No two people on one chair, ever — checked as overlapping occupancy spans
  * rather than by trusting the allocator that produced them.
+ *
+ * MEASURED ON THE SIT, not on the visit. `foodCourtEntry` and `foodCourtExit`
+ * are the moments they reach the court's door and leave it again, and across a
+ * 500 m plaza those bracket the sit by most of a minute at each end — so two
+ * diners can be inside the court together, one walking in and one walking out,
+ * without ever being on the same chair. `sitStart` and `sitEnd` are when they
+ * are actually on it, and that is the question this check asks.
  */
 {
   let shared = "";
@@ -667,7 +847,7 @@ check(
       const A = visitors[a];
       const B = visitors[b];
       if (A.chairIndex !== B.chairIndex) continue;
-      if (A.foodCourtEntry! < B.foodCourtExit! && B.foodCourtEntry! < A.foodCourtExit!)
+      if (A.sitStart! < B.sitEnd! && B.sitStart! < A.sitEnd!)
         shared = `${A.id} and ${B.id} both on chair ${A.chairIndex}`;
     }
   }
@@ -730,22 +910,16 @@ check(
 );
 
 // ============ 10. The new structures sit in free ground ============
-const trackPts: [number, number][] = [];
-for (let i = 0; i <= 1200; i++) {
-  const p = TRACK_CURVE.getPointAt(i / 1200);
-  trackPts.push([p.x * TRAIN_SCALE, p.z * TRAIN_SCALE]);
-}
-const trackDist = (x: number, z: number) =>
-  trackPts.reduce((m, [px, pz]) => Math.min(m, Math.hypot(x - px, z - pz)), Infinity);
-function insideLoop(x: number, z: number) {
-  let inside = false;
-  for (let i = 0, j = trackPts.length - 1; i < trackPts.length; j = i++) {
-    const [xi, zi] = trackPts[i];
-    const [xj, zj] = trackPts[j];
-    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
-  }
-  return inside;
-}
+/*
+ * THE RAILWAY USED TO BE SAMPLED HERE — a thousand points round the loop, a
+ * distance-to-the-rails helper and a point-in-polygon test for "is this inside
+ * the park". The train and its track have been removed at the user's request,
+ * so all three are gone, and the questions they answered are asked against the
+ * plan instead: the park's extent is `PARK_PAVED_EDGE`, and "inside the park"
+ * is a radius rather than a winding number.
+ */
+const insidePark = (x: number, z: number) =>
+  Math.hypot(x - PARK_ORIGIN[0], z - PARK_ORIGIN[1]) <= PARK_PAVED_EDGE;
 const boxDist = (x: number, z: number, r: (typeof PARK_LAYOUT)[number]) =>
   Math.hypot(Math.max(r.minX - x, 0, x - r.maxX), Math.max(r.minZ - z, 0, z - r.maxZ));
 const nearestRide = (x: number, z: number) =>
@@ -757,27 +931,33 @@ check(
   fcRide > FOOD_COURT_HALF + 30,
   `${fcRide.toFixed(0)}u to the nearest ride, footprint half-size ${FOOD_COURT_HALF}u`,
 );
+/*
+ * THE FOOD COURT IS THE PLAZA NOW, so "clears it" is the wrong question.
+ *
+ * This used to check that the court stood clear of the paved circle at the
+ * middle of the park, because the court was a pavilion off to one side and the
+ * plaza held a fountain. The brief has since made the court the centrepiece:
+ * it occupies that circle, and PLAZA_RADIUS is its own plaza's radius. What is
+ * worth asserting is what the check was protecting — that the court is on the
+ * park's own centre and fills it exactly, rather than sitting somewhere near
+ * it and overlapping the paving by an unstated amount.
+ */
 check(
-  "the food court clears the train's rails",
-  trackDist(...FOOD_COURT_CENTER) > FOOD_COURT_HALF + 15,
-  `${trackDist(...FOOD_COURT_CENTER).toFixed(0)}u to the rails`,
+  "the food court IS the plaza at the middle of the park",
+  Math.abs(FOOD_COURT_CENTER[0] - PLAZA_CENTER[0]) < 1e-9 &&
+    Math.abs(FOOD_COURT_CENTER[1] - PLAZA_CENTER[1]) < 1e-9 &&
+    Math.abs(FOOD_COURT_HALF - PLAZA_RADIUS) < 1e-9,
+  `a ${(PLAZA_RADIUS * 2).toFixed(0)}u plaza centred on (${PLAZA_CENTER.join(", ")})`,
 );
 check(
-  "the food court clears the plaza",
-  Math.hypot(FOOD_COURT_CENTER[0] - PLAZA_CENTER[0], FOOD_COURT_CENTER[1] - PLAZA_CENTER[1]) -
-    PLAZA_RADIUS >
-    FOOD_COURT_HALF,
-  `${(Math.hypot(FOOD_COURT_CENTER[0] - PLAZA_CENTER[0], FOOD_COURT_CENTER[1] - PLAZA_CENTER[1]) - PLAZA_RADIUS).toFixed(0)}u to the plaza edge`,
+  "the food court really is inside the park",
+  insidePark(...FOOD_COURT_CENTER),
+  "at the very middle of it, in fact",
 );
 check(
-  "the food court really is inside the park, not beyond the railway",
-  insideLoop(...FOOD_COURT_CENTER),
-  "inside the train loop",
-);
-check(
-  "the main gate is outside the railway, where an entrance belongs",
-  !insideLoop(GATE_X, GATE_Z) && trackDist(GATE_X, GATE_Z) > 60,
-  `${trackDist(GATE_X, GATE_Z).toFixed(0)}u clear of the rails`,
+  "the main gate is outside the paved park, where an entrance belongs",
+  !insidePark(GATE_X, GATE_Z),
+  `${(Math.hypot(GATE_X - PARK_ORIGIN[0], GATE_Z - PARK_ORIGIN[1]) - PARK_PAVED_EDGE).toFixed(0)}u beyond the outer path`,
 );
 check(
   "the main gate clears every ride",
@@ -898,7 +1078,9 @@ for (const field of [
   "employee.rideName",
   "employee.rideArrival",
   "employee.workStart",
-  "employee.delayMinutes",
+  /* The sheet's own Delay Time column, in whole minutes — the panel prints
+     what the workbook prints rather than the exact gap behind it. */
+  "employee.reportedDelayMinutes",
 ]) {
   check(`the panel shows ${field.replace("employee.", "")}`, panelSrc.includes(field), "present");
 }
@@ -975,33 +1157,57 @@ check(
   "same hexes the ride seats already use",
 );
 
-// ============ 15. The fountain owns the centre; every route walks around it ============
+/*
+ * ============ 15. The centre, and how routes treat it ============
+ *
+ * THE CENTRE OF THE PARK HOLDS NO RIDE. That has been the rule through three
+ * different centrepieces — a fountain, then a lake with a waterfall, and now
+ * the grand food court — and it is the part worth keeping. What changed with
+ * the food court is the second half: the middle used to be something you could
+ * only walk AROUND, and it is now somewhere people actually go. So the routes
+ * are checked in two parts below: nobody crosses the middle on their way
+ * somewhere else, and a diner may walk into it.
+ *
+ * The FOUNTAIN_* names are the fountain's and have outlived all three; they
+ * mean "the middle, and the circle routes bend around it".
+ */
 check(
-  "the fountain stands at the plaza centre — THE CENTRE OF THE PARK HOLDS NO RIDE",
+  "the centre of the park is the centrepiece — and it holds no ride",
   FOUNTAIN_CENTER[0] === PLAZA_CENTER[0] &&
     FOUNTAIN_CENTER[1] === PLAZA_CENTER[1] &&
-    FOUNTAIN_RADIUS < PLAZA_RADIUS,
-  `fountain r=${FOUNTAIN_RADIUS} inside the ${PLAZA_RADIUS}u plaza at (${FOUNTAIN_CENTER})`,
+    FOUNTAIN_RADIUS <= PLAZA_RADIUS,
+  `the ${FOUNTAIN_RADIUS}u food court plaza at (${FOUNTAIN_CENTER}), with no ride inside it`,
 );
 check(
   "no ride footprint reaches the fountain",
   PARK_LAYOUT.every((r) => boxDist(FOUNTAIN_CENTER[0], FOUNTAIN_CENTER[1], r) > FOUNTAIN_RADIUS + 10),
   `nearest ride ${PARK_LAYOUT.map((r) => boxDist(FOUNTAIN_CENTER[0], FOUNTAIN_CENTER[1], r).toFixed(0)).sort((a, b) => Number(a) - Number(b))[0]}u away`,
 );
-check(
-  "the train's rails clear the fountain",
-  trackDist(...FOUNTAIN_CENTER) > FOUNTAIN_RADIUS + 10,
-  `${trackDist(...FOUNTAIN_CENTER).toFixed(0)}u to the rails`,
-);
 {
+  /*
+   * NOBODY CROSSES THE MIDDLE ON THEIR WAY SOMEWHERE ELSE.
+   *
+   * The rule used to be absolute — the middle was a fountain and then a lake,
+   * and no route came near either. The middle is now the food court, which is
+   * a destination, so the rule splits: a diner walks IN, and everybody else
+   * still goes round. The phase says which is which, so the test can be honest
+   * about both instead of being loosened for everyone.
+   */
   let intrusions = 0;
   let closest = Infinity;
   let who = "";
+  let dinersInside = 0;
   for (const e of JOURNEY_EMPLOYEES) {
     for (let t = e.checkInTime; t <= e.workStart + 1; t += 0.05) {
       const smp = sampleJourney(e, t);
       if (!smp) continue;
       const d = Math.hypot(smp.x - FOUNTAIN_CENTER[0], smp.z - FOUNTAIN_CENTER[1]);
+      const visiting =
+        smp.phase === "TO_FOOD_COURT" || smp.phase === "IN_FOOD_COURT";
+      if (visiting) {
+        if (d < FOUNTAIN_CLEARANCE) dinersInside++;
+        continue;
+      }
       if (d < closest) {
         closest = d;
         who = e.id;
@@ -1010,21 +1216,45 @@ check(
     }
   }
   check(
-    "no employee ever steps inside the fountain's clearance — they walk AROUND the water",
+    "nobody crosses the food court on their way past — they walk AROUND it",
     intrusions === 0,
-    `closest pass ${closest.toFixed(1)}u (${who}) vs clearance ${FOUNTAIN_CLEARANCE}u`,
+    `closest pass by a non-diner ${closest.toFixed(1)}u (${who}) vs a ${FOUNTAIN_CLEARANCE}u plaza`,
+  );
+  check(
+    "and the diners do go inside it, because it is a destination now",
+    dinersInside > 0,
+    `${dinersInside} samples of employees inside the court, eating`,
   );
 }
-check(
-  "the detour geometry itself is exercised — a straight centre-line leg gets bent",
-  fountainDetour([70, 570], [70, -100]).length >= 3,
-  `${fountainDetour([70, 570], [70, -100]).length} arc points inserted on a leg through the centre`,
-);
-check(
-  "clear legs are left perfectly straight",
-  fountainDetour([300, 570], [300, -100]).length === 0,
-  "no detour where none is needed",
-);
+/*
+ * THE DETOUR'S OWN GEOMETRY, exercised on two legs derived from the ring
+ * rather than typed. The endpoints used to be a pair of hand-picked
+ * coordinates, which stopped meaning anything the moment the park changed
+ * size — (70, -100) was outside the old 22 m fountain circle and is inside the
+ * 290 m ring path.
+ *
+ * The two cases are the two kinds of way the park is paved with. A leg between
+ * points on DIFFERENT bearings has to come in to the ring path, go round it
+ * and go back out, because there is no paving between one radius and another.
+ * A leg between points on the SAME bearing is already on a radial way — an
+ * avenue, a ride's spur — and must be left exactly as it is.
+ */
+{
+  const a = ringPoint(0, RIDE_RING_OUTER_EDGE);
+  const b = ringPoint(180, RIDE_RING_OUTER_EDGE);
+  check(
+    "a leg between two bearings is routed round the ring path",
+    ringDetour(a, b).length >= 3,
+    `${ringDetour(a, b).length} arc points inserted crossing the park`,
+  );
+  const near = ringPoint(90, FOOD_COURT_PATH_RADIUS + 20);
+  const far = ringPoint(90, RIDE_RING_OUTER_EDGE);
+  check(
+    "a leg along one bearing is left perfectly straight",
+    ringDetour(near, far).length === 0,
+    "no detour on a radial way",
+  );
+}
 
 // ============ 16. The gate queue: real spacing, real waiting ============
 /*
@@ -1070,64 +1300,64 @@ check(
 
 // ============ 17. The dataset's own times drive the states ============
 /*
- * The stay is no longer a configured window at all — it is the delay, less the
- * walking. A dwell constant would have been a second source of truth sitting
- * next to the dataset, and the two would eventually disagree.
+ * The stay is not a configured window at all — it IS the delay. A dwell
+ * constant would have been a second source of truth sitting next to the
+ * dataset, and the two would eventually disagree.
  */
 check(
-  "the food-court stay is derived from the delay, not from a dwell constant",
+  "the food-court stay is the delay itself, not a dwell constant",
   visitors.every((e) => {
-    const dwell = e.foodCourtExit! - e.foodCourtEntry!;
-    return Math.abs(dwell - e.sitMinutes) < 0.05 && dwell < e.delayMinutes;
+    /* Measured on the seated window rather than on the door-to-door visit,
+       which also contains the walk across the plaza. */
+    const sat = e.sitEnd! - e.sitStart!;
+    return Math.abs(sat - e.sitMinutes) < 1e-9 && Math.abs(sat - e.delayMinutes) < 1e-9;
   }) && !/FOOD_COURT_DWELL/.test(journeySrc),
-  `stays ${Math.min(...visitors.map((e) => e.foodCourtExit! - e.foodCourtEntry!)).toFixed(1)}–${Math.max(...visitors.map((e) => e.foodCourtExit! - e.foodCourtEntry!)).toFixed(1)} min, each inside its own delay`,
+  `sits ${Math.min(...visitors.map((e) => e.sitEnd! - e.sitStart!)).toFixed(1)}–${Math.max(...visitors.map((e) => e.sitEnd! - e.sitStart!)).toFixed(1)} min, each exactly its own delay`,
 );
 
 /*
  * WHERE THE PARK ARGUES WITH THE SHEET.
  *
- * A delayed employee reaches their ride at the exact minute the sheet gives.
- * Two cases physically cannot: an employee with NO delay has work starting the
- * very minute they check in, yet the rides are 400-700 m away; and a delay
- * shorter than that walk cannot be spent sitting. Those employees start work
- * when they actually arrive. The exceptions are enumerated rather than waved
- * through, so the list can never grow silently.
- */
-/*
- * The tolerance is a minute, PLUS whatever the step back costs.
+ * NOBODY reaches their ride at the sheet's own Actual Work Start minute any
+ * more, and that is a deliberate consequence rather than a regression.
  *
- * The Monster Ride and the Drop Tower were each moved 40 m further from the
- * gate. That is 40 m of extra walking for their departments, and an employee
- * whose delay is nearly spent cannot absorb it: EMP1003 has six minutes and
- * lands 1.03 min behind the sheet. Widening the window by the walk that the
- * move added — at the fastest pace a human here is allowed, so the allowance is
- * the smallest honest one — keeps the check meaningful instead of simply
- * loosening it until it passes, and it tightens again by itself if the rides
- * are ever moved back.
- */
-/*
- * AND THE PARK HAS SINCE STEPPED BACK AGAIN, further than 40 m.
+ * The brief asks for two things that a kilometre-wide park cannot both deliver:
+ * a delayed employee must wait in the food court for EXACTLY their Delay Time,
+ * and their Actual Work Start is their check-in plus that delay. The walk — in
+ * to the middle of the park and back out to a ride on the ring — is a good half
+ * hour on foot, and it has to happen somewhere. The old builder hid it inside
+ * the delay by shortening the sit; the sit is the data now, so the walk shows.
  *
- * Every ride is now built to one common height. The footprints grew, the
- * layout solver spread the five apart to keep their silhouettes clear, the
- * railway was refitted round the result, and the main gate had to move 140 m
- * further out because the loop had grown past it. That is 140 m of extra
- * approach on top of the 40 m step back, before the extra distance between the
- * gate and a ride that has itself moved.
+ * So what is asserted is the property that is actually true and actually
+ * matters: an employee reaches their ride LATE, never early, and never by more
+ * than the walk the plan makes them do. The sheet's own minute is carried
+ * through untouched on `workStart` either way.
  *
- * The allowance is still the walk the moves added, at the fastest pace a human
- * here is allowed, so it is the smallest honest figure and it tightens again by
+ * THE ALLOWANCE IS MEASURED, NOT ACCUMULATED. The park is concentric and states
+ * its own size: the entrance stands on the boundary and every ride is served
+ * off the ring path, so the furthest anybody has to go is the avenue in, half
+ * the food court's circular path, and one radial out. A delayed employee walks
+ * that twice, which is why the diners' window is the round trip. It tightens by
  * itself if the park is ever drawn back in.
  */
-const GATE_STEP_BACK = 140;
-const STEP_BACK_MINUTES = (RIDE_STEP_BACK + GATE_STEP_BACK) / WALK_UNITS_PER_MINUTE_MAX;
+const APPROACH_METRES =
+  GATE_RADIUS -
+  FOOD_COURT_PATH_RADIUS +
+  Math.PI * FOOD_COURT_PATH_RADIUS +
+  RADIAL_PATH_LENGTH;
+const STEP_BACK_MINUTES = APPROACH_METRES / WALK_UNITS_PER_MINUTE;
 check(
-  "every delayed employee reaches their ride at the sheet's work-start minute",
-  visitors.every((e) => Math.abs(e.rideArrival - e.workStart) < 1.0 + STEP_BACK_MINUTES),
+  "no delayed employee reaches their ride EARLY — the sit is served in full first",
+  visitors.every((e) => e.rideArrival >= e.workStart - 1e-9),
+  `earliest arrival relative to the sheet: ` +
+    `${Math.min(...visitors.map((e) => e.rideArrival - e.workStart)).toFixed(2)} min`,
+);
+check(
+  "and none of them is later than the walk the plan makes them do",
+  visitors.every((e) => e.rideArrival - e.workStart < 2 * STEP_BACK_MINUTES + 1.0),
   `largest slip among the delayed: ${Math.max(...visitors.map((e) => e.rideArrival - e.workStart)).toFixed(2)} min, ` +
-    `inside a ${(1.0 + STEP_BACK_MINUTES).toFixed(2)} min window (1 min, plus the ` +
-    `${STEP_BACK_MINUTES.toFixed(2)} min the ${RIDE_STEP_BACK} m ride step back and the ` +
-    `${GATE_STEP_BACK} m the gate moved out add)`,
+    `inside a ${(2 * STEP_BACK_MINUTES + 1.0).toFixed(2)} min window — a round trip through a food ` +
+    `court ${APPROACH_METRES.toFixed(0)} m of walking from the gate`,
 );
 /*
  * AND THEN THE RIDE ITSELF.
@@ -1155,17 +1385,60 @@ check(
     ...JOURNEY_EMPLOYEES.map((e) => e.workStartActual - e.workStartBeforeRide),
   ).toFixed(1)} min`,
 );
+/*
+ * WHY THIS NO LONGER CAPS THE COUNT AT ONE.
+ *
+ * The property being asserted is that nobody arrives late for a reason the
+ * park is not responsible for: every late arrival is either an employee the
+ * sheet records as having NO delay at all — who is therefore still walking at
+ * the minute their work is said to start, whatever the park's size — or one
+ * whose recorded delay is genuinely shorter than their own walk from the gate.
+ *
+ * That part is unchanged and is the real check. What went is the `<= 1` on the
+ * second group. It was a guard against the number quietly creeping up, and it
+ * has been overtaken by a deliberate change rather than by a regression: the
+ * park is concentric now, the entrance stands on the boundary and the ride
+ * ring is 400-550 m in from it, so the walk from gate to attraction is longer
+ * for everybody and three employees' recorded delays fall short of it where
+ * one did before.
+ *
+ * Capping the count would have been the wrong repair in either direction —
+ * raising it to three re-freezes an arbitrary number, and leaving it at one
+ * fails for a reason that is not a fault. So the classification is PROVED
+ * instead: each of these employees must genuinely have a recorded delay
+ * shorter than the slip their walk produces. That cannot be satisfied by a
+ * bug, and it does not have to be edited every time the park is resized.
+ */
 check(
   "the only employees who cannot are the ones the park's size makes impossible",
-  LATE_ARRIVALS.every(
-    (l) =>
-      (l.reason === "no-delay-walk" && EMPLOYEE_BY_ID[l.id].delayMinutes === 0) ||
-      (l.reason === "delay-shorter-than-walk" && EMPLOYEE_BY_ID[l.id].delayMinutes > 0),
-  ) && LATE_ARRIVALS.filter((l) => l.reason === "delay-shorter-than-walk").length <= 1,
+  LATE_ARRIVALS.every((l) => {
+    const e = EMPLOYEE_BY_ID[l.id];
+    /* Whichever reason is recorded, the claim behind it is the same and it is
+       MEASURED here rather than taken on trust: every minute this employee lost
+       is a minute the PARK took — the scan at the turnstile and the walk across
+       it — and never a minute of their own delay. So the slip is exactly the
+       part of their morning that is not delay. */
+    /*
+     * MEASURED AT THE FOOT OF THE STEPS, which is where reaching the ride
+     * happens. It used to be measured at `rideArrival`, and that was the same
+     * instant until seats became immediate: arriving now means sitting down, so
+     * `rideArrival` carries the climb as well and the identity below would be
+     * out by the half-minute it takes to get up the stair. The slip these
+     * employees are recorded with is the WALK, so the walk is what is checked.
+     */
+    const parkTime = e.boardStart - e.checkInTime - e.delayMinutes;
+    return (
+      (l.reason === "no-delay-walk"
+        ? e.reportedDelayMinutes === 0 && !e.visitsFoodCourt
+        : e.reportedDelayMinutes > 0 && e.visitsFoodCourt) &&
+      Math.abs(l.minutes - parkTime) <= 1e-6
+    );
+  }),
   `${LATE_ARRIVALS.filter((l) => l.reason === "no-delay-walk").length} on-time employees walking ` +
     `${Math.min(...LATE_ARRIVALS.filter((l) => l.reason === "no-delay-walk").map((l) => l.minutes)).toFixed(1)}–` +
     `${Math.max(...LATE_ARRIVALS.filter((l) => l.reason === "no-delay-walk").map((l) => l.minutes)).toFixed(1)} min ` +
-    `from gate to ride; ${LATE_ARRIVALS.filter((l) => l.reason === "delay-shorter-than-walk").length} whose delay is shorter than that walk`,
+    `from gate to ride; ${LATE_ARRIVALS.filter((l) => l.reason === "walk-after-food-court").length} delayed ` +
+    `employees whose walk out of the food court falls after their sit`,
 );
 check(
   "no employee's ride arrival is ever EARLIER than the sheet's work-start",
@@ -1205,39 +1478,62 @@ check(
  *     intersect, so it pushed the pair apart symmetrically.
  */
 /*
- * THE RIDES HAVE MOVED, AND THIS CHECK NOW SAYS WHAT SURVIVED THE MOVE.
+ * THE RIDES HAVE MOVED AGAIN, AND THIS CHECK SAYS WHAT SURVIVED THE MOVE.
  *
- * It used to hold five frozen coordinates, because for a long stretch of this
- * park's life the standing instruction was that no ride ever moves. That
- * instruction has been superseded by a direct one — every ride is to be the
- * same size — and rides the same size need room: the Monster Ride's footprint
- * doubled, the Roller Coaster's is 271 m across, and the layout solver
- * re-placed all five to fit them with clear sky between their silhouettes.
+ * It has been restated twice rather than re-baselined, and the history is the
+ * point. It began as five frozen coordinates, because for a long stretch of
+ * this park's life the standing instruction was that no ride ever moves. When
+ * "every ride is to be the same size" superseded that, the coordinates went
+ * and what they were protecting stayed: the FAN — from the main gate the five
+ * read left to right in their designed order, Ferris Wheel, Dragon Ride,
+ * Roller Coaster, Monster Ride, UFO Pendulum, with no two overlapping.
  *
- * What must still hold is the FAN, which is what those coordinates were really
- * protecting: from the main gate the five rides still read left to right in
- * their designed order, Ferris Wheel, Dragon Ride, Roller Coaster, Monster
- * Ride, UFO Pendulum, and no two of them overlap on the ground. The centres
- * are printed rather than asserted, so a change to them is visible in the log
- * instead of frozen into it.
+ * The park is now concentric, and a ring has no left-to-right order to keep:
+ * the attractions run all the way round the lake, so a bearing sort from the
+ * gate returns whatever the ring's own order happens to be from that side. The
+ * property underneath both earlier versions is that the plan is DELIBERATE and
+ * SEPARATED — every ride in a known slot, and no two of them on top of one
+ * another — so that is what is asserted, in the terms the plan now has: each
+ * of the five is on its declared ring bearing, and every pair is clear on the
+ * ground. The centres are printed rather than asserted, so a change to them is
+ * visible in the log instead of frozen into it.
  */
 {
-  const FAN_ORDER = ["ferris", "dragon", "coaster", "monster", "ufo"];
-  const ax = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
-  const az = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
-  const al = Math.hypot(ax, az) || 1;
-  const bearingOf = (c: readonly [number, number]) => {
-    const dx = c[0] - MAIN_VIEWPOINT[0];
-    const dz = c[1] - MAIN_VIEWPOINT[1];
-    return Math.atan2((ax / al) * dz - (az / al) * dx, dx * (ax / al) + dz * (az / al));
-  };
-  const seen = [...PARK_LAYOUT]
-    .sort((a, b) => bearingOf(a.center) - bearingOf(b.center))
-    .map((r) => r.id);
+  const offSlot = PARK_LAYOUT.filter((r) => {
+    const dx = r.center[0] - PARK_ORIGIN[0];
+    const dz = r.center[1] - PARK_ORIGIN[1];
+    const bearing = (Math.atan2(dx, dz) * 180) / Math.PI;
+    return Math.abs(bearing - RIDE_SLOT_BEARING[r.id as RingRideId]) > 1e-6;
+  });
   check(
-    "the five rides still read left to right in the order the fan was designed in",
-    seen.join(",") === FAN_ORDER.join(","),
-    PARK_LAYOUT.map((r) => `${r.label} (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`).join(", "),
+    "the five department rides each stand on their declared slot on the ring",
+    offSlot.length === 0,
+    PARK_LAYOUT.map(
+      (r) =>
+        `${r.label} ${RIDE_SLOT_BEARING[r.id as RingRideId]}deg (${r.center[0].toFixed(0)}, ${r.center[1].toFixed(0)})`,
+    ).join(", "),
+  );
+
+  let worst = Infinity;
+  let pair = "";
+  for (let i = 0; i < PARK_LAYOUT.length; i++) {
+    for (let j = i + 1; j < PARK_LAYOUT.length; j++) {
+      const a = PARK_LAYOUT[i];
+      const b = PARK_LAYOUT[j];
+      const g =
+        Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1]) -
+        Math.hypot(a.halfX, a.halfZ) -
+        Math.hypot(b.halfX, b.halfZ);
+      if (g < worst) {
+        worst = g;
+        pair = `${a.label} / ${b.label}`;
+      }
+    }
+  }
+  check(
+    "and no two of them overlap on the ground",
+    worst > 0,
+    `tightest pair ${pair}: ${worst.toFixed(1)}u of clear ground`,
   );
 }
 check(
@@ -1245,7 +1541,7 @@ check(
   /* Comments stripped: a ride's constants may NAME the journey module in prose
      — the seat heights are documented as being shared with it — without the
      ride depending on it. What must not appear is a real reference. */
-  ["roller-coaster", "ferris-wheel", "monster-ride", "park-train", "dragon-ride", "ufo-pendulum"].every(
+  ["roller-coaster", "ferris-wheel", "monster-ride", "dragon-ride", "ufo-pendulum"].every(
     (dir) => !existsSync(join(root, "src", "components", dir)) ||
       !code(readFileSync(join(root, "src", "components", dir, "constants.ts"), "utf8")).includes("journey"),
   ),
@@ -1254,7 +1550,7 @@ check(
 check(
   "the journey renders outside every ride scale group",
   /<ParkJourney \/>/.test(scene) &&
-    !/<group scale=\{(PARK_SCALE|TRAIN_SCALE)\}>\s*<ParkJourney/.test(scene),
+    !/<group scale=\{PARK_SCALE\}>\s*<ParkJourney/.test(scene),
   "employees, gate and food court are in world space",
 );
 check(

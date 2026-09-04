@@ -23,6 +23,7 @@ import {
 } from "@/simulation/journey/constants";
 import {
   PAVILION_DEPTH,
+  PAVILION_BACK,
   PAVILION_FRONT,
   PAVILION_HALF_WIDTH,
   PAVILION_TOP,
@@ -183,12 +184,22 @@ ok(PAVILION_HALF_WIDTH * 2 > 40 * 1.7 && PAVILION_DEPTH > 15 * 2.5 && PAVILION_T
    corners of the pavilion standing on grass. */
 ok(/TERRACE_HALF_X = PAVILION_HALF_WIDTH \+/.test(fc) && /TERRACE_BACK = PAVILION_BACK -/.test(fc),
    "the terrace paving is sized from the pavilion rather than typed, so it always reaches past it");
-/* And the building must not have grown forward into the diners. */
+/*
+ * And the building must not have grown out into the diners.
+ *
+ * MEASURED ON THE RADIUS NOW, not on z. The tables used to sit in one file in
+ * front of the pavilion, so "the nearest table" was the one with the smallest
+ * z and the building only had to stop short of it. The court is a circular
+ * plaza and the tables ring it, so the pavilion has to clear the seating in
+ * EVERY direction — which is what the radius asks, and what the old test would
+ * have missed entirely for a table set behind the hall.
+ */
 {
-  const nearestTable = Math.min(...FOOD_COURT_TABLES.map((t) => t[1]));
-  ok(PAVILION_FRONT < nearestTable - 2,
-     `its front edge stops at z ${PAVILION_FRONT.toFixed(1)} with the nearest table at ` +
-     `z ${nearestTable.toFixed(1)} — the veranda covers the kiosks without reaching the tables`);
+  const nearestTable = Math.min(...FOOD_COURT_TABLES.map((t) => Math.hypot(t[0], t[1])));
+  const pavilionReach = Math.max(PAVILION_HALF_WIDTH, Math.abs(PAVILION_FRONT), Math.abs(PAVILION_BACK));
+  ok(pavilionReach < nearestTable - 2,
+     `it reaches ${pavilionReach.toFixed(1)} m from the middle with the nearest table at ` +
+     `${nearestTable.toFixed(1)} m — the veranda covers the kiosks without reaching the seating`);
 }
 ok(/function DomedHall/.test(fc) && /function Wing/.test(fc) && /function Veranda/.test(fc) &&
    /function ArchedBay/.test(fc),

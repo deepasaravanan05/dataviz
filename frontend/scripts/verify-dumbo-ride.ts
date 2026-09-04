@@ -1,11 +1,23 @@
 import { readFileSync } from "node:fs";
+import {
+  LAKE_CLEARANCE_RADIUS,
+  PARK_ORIGIN,
+  RADIAL_PATH_LENGTH,
+  RIDE_PLOT_RADIUS,
+  RIDE_RING_RADIUS,
+  RIDE_SLOT_BEARING,
+  radialStart,
+  rideEntrance,
+  ringRadiusOf,
+  ringCenterOf,
+  type RingRideId,
+} from "../src/components/park/parkRing";
 import { join } from "node:path";
 import {
   ARM_HANGER,
   ARM_LENGTH,
   ARM_PITCH_RADIANS,
   ARM_SWING,
-  BEHIND_RIDE_ID,
   BODY_HALF_WIDTH,
   BODY_LENGTH,
   BOARDING_RADIUS,
@@ -54,26 +66,14 @@ import {
   peakClimbRate,
   vehicleHeightAt,
 } from "../src/components/dumbo-ride/motion";
-import {
-  BEHIND_DISTANCE,
-  COMFORT_SLACK,
-  FAN_ANGLE_DEG,
-  FAN_LIMIT_DEG,
-  NEIGHBOUR,
-  RIDE_CENTER,
-  acrossBearing,
-  alongBearing,
-  hidesARide,
-  isBehindNeighbour,
-  slackAt,
-} from "../src/components/dumbo-ride/placement";
+import { RIDE_CENTER, RIDE_FACING } from "../src/components/dumbo-ride/placement";
 import {
   STATION_FLIGHTS,
   STATION_RISE,
   STATION_STEPS,
 } from "../src/components/dumbo-ride/station";
 import { PARK_LAYOUT } from "../src/components/park/layout";
-import { DEPARTMENTS, rideForDepartment } from "../src/components/park/departments";
+import { DEPARTMENTS } from "../src/components/park/departments";
 import { placeById } from "../src/components/world/cameraPlaces";
 import { PARK_SHRUBS, PARK_TREES } from "../src/components/world/planting";
 import { MAX_FLIGHT_RISE, STAIR_RISE } from "../src/simulation/journey/boardingStair";
@@ -319,53 +319,128 @@ check(
   "the parallelogram linkage a real Dumbo has",
 );
 
-/* ================= 4. IT IS BEHIND THE DATA ENGINEERS ================= */
+/* ================= 4. ITS SLOT ON THE PARK RING ================= */
 
-check(
-  "the Data Engineering ride is the UFO Pendulum, and this ride was placed against it",
-  rideForDepartment("Data Engineering").rideId === BEHIND_RIDE_ID &&
-    NEIGHBOUR.id === BEHIND_RIDE_ID,
-  `department mapping untouched: Data Engineering → ${BEHIND_RIDE_ID}`,
-);
-check(
-  "and it stands BEYOND the pendulum on the gate's own line of sight through it",
-  isBehindNeighbour(rx, rz) &&
-    alongBearing(rx, rz) > alongBearing(NEIGHBOUR.center[0], NEIGHBOUR.center[1]),
-  `${BEHIND_DISTANCE.toFixed(0)} m out past the pendulum's centre`,
-);
+/*
+ * THE BRIEF THAT PUT THIS RIDE HERE HAS CHANGED, and the checks change with it
+ * rather than being deleted.
+ *
+ * It was asked for a place behind the UFO Pendulum but off the line the Tea Cups
+ * already held, and the placement fanned round from that bearing until the
+ * ground was clear.
+ * This section then re-measured every margin that search had honoured, and
+ * asserted that the ride hid nothing from the main entrance.
+ *
+ * The park is a ring now. Every attraction has a numbered slot, the slots are
+ * solved together in `parkRing.ts` so a neighbour cannot crowd this ride
+ * however anything is resized, and `verify-park-layout.ts` measures the
+ * clearance between all ten in one place instead of each ride vouching for
+ * itself. What is left to check HERE is that this ride is actually standing on
+ * the slot it was given, and that the slot puts it where the plan says: on its
+ * own bearing, at the ring's radius, with its inner edge on the apron the ring
+ * path serves.
+ *
+ * The sightline check is gone, and not because it regressed. A concentric park
+ * puts five of its ten attractions on the far side of the lake from the gate,
+ * so from the entrance the near half stands in front of the far half by
+ * construction — that is what a ring IS. The property that replaces it, that
+ * every attraction holds its own share of the overview frame, is measured
+ * through the real camera in `verify-night.ts`.
+ */
 {
-  const sideways = Math.abs(
-    acrossBearing(rx, rz) - acrossBearing(NEIGHBOUR.center[0], NEIGHBOUR.center[1]),
-  );
-  /* Off the line, because the Tea Cups hold it — but inside the fan's own
-     limit, which is what keeps "behind" meaning behind rather than beside. */
+  const dx = RIDE_CENTER[0] - PARK_ORIGIN[0];
+  const dz = RIDE_CENTER[1] - PARK_ORIGIN[1];
+  const radius = Math.hypot(dx, dz);
+  const bearing = (Math.atan2(dx, dz) * 180) / Math.PI;
+
   check(
-    "off that line by less than the fan allows, because the Tea Cups already stand on it",
-    Math.abs(FAN_ANGLE_DEG) <= FAN_LIMIT_DEG && sideways < BEHIND_DISTANCE * 0.5,
-    `${FAN_ANGLE_DEG}° off against a ${FAN_LIMIT_DEG}° limit, which is ${sideways.toFixed(1)} m ` +
-      `to the side over ${BEHIND_DISTANCE.toFixed(0)} m out`,
+    "it stands exactly on its slot bearing, with nothing across it",
+    Math.abs(bearing - RIDE_SLOT_BEARING.dumbo) < 1e-9,
+    `${bearing.toFixed(6)}deg against the plan's ${RIDE_SLOT_BEARING.dumbo}deg`,
+  );
+  check(
+    "and at exactly the ring radius — the same as every other ride",
+    Math.abs(radius - RIDE_RING_RADIUS) < 1e-9 && Math.abs(radius - ringRadiusOf()) < 1e-9,
+    `${radius.toFixed(3)} m from the middle, and there is only one such radius`,
+  );
+  check(
+    "its platform is the park's one plot size, and its machine fits inside it",
+    RIDE_PLOT_RADIUS >= OVERALL_REACH,
+    `a ${(RIDE_PLOT_RADIUS * 2).toFixed(0)} m platform holding a ${(OVERALL_REACH * 2).toFixed(0)} m ride`,
+  );
+  const entrance = rideEntrance("dumbo");
+  const start = radialStart("dumbo");
+  check(
+    "its radial path runs down its own bearing, from the food court to its entrance",
+    Math.abs(
+      Math.atan2(start[0] - PARK_ORIGIN[0], start[1] - PARK_ORIGIN[1]) -
+        Math.atan2(entrance[0] - PARK_ORIGIN[0], entrance[1] - PARK_ORIGIN[1]),
+    ) < 1e-9,
+    `entrance at (${entrance[0].toFixed(1)}, ${entrance[1].toFixed(1)})`,
+  );
+  check(
+    "and it is the same length as every other radial in the park",
+    Math.abs(Math.hypot(entrance[0] - start[0], entrance[1] - start[1]) - RADIAL_PATH_LENGTH) < 1e-6,
+    `${Math.hypot(entrance[0] - start[0], entrance[1] - start[1]).toFixed(1)} m, ` +
+      `against a plan length of ${RADIAL_PATH_LENGTH.toFixed(1)} m`,
+  );
+  check(
+    "it is clear of the food court in the middle of the park",
+    radius - OVERALL_REACH > LAKE_CLEARANCE_RADIUS,
+    `inner edge ${(radius - OVERALL_REACH).toFixed(0)} m out, court ${LAKE_CLEARANCE_RADIUS} m`,
   );
 }
+
 {
-  const worst = slackAt(rx, rz).reduce((a, b) => (a.slack < b.slack ? a : b));
+  /*
+   * WHICH WAY IT FACES, measured rather than assumed.
+   *
+   * The ride's local +X is its long axis — the plane of a loop, the line of a
+   * circuit, the front of a platform — and a group rotated by `alpha` about +Y
+   * carries local +X to (cos alpha, -sin alpha) in world x/z. Presented to the
+   * people looking at it, that has to come out perpendicular to the line from
+   * the ride to the middle of the park.
+   *
+   * It used to be measured against the MAIN ENTRANCE, which was the same thing
+   * while every ride stood in a fan in front of the gate. On a ring it is not:
+   * people reach this ride off the ring path, which runs inside it.
+   */
+  const axisX = Math.cos(RIDE_FACING);
+  const axisZ = -Math.sin(RIDE_FACING);
+  const outX = RIDE_CENTER[0] - PARK_ORIGIN[0];
+  const outZ = RIDE_CENTER[1] - PARK_ORIGIN[1];
+  const outLen = Math.hypot(outX, outZ) || 1;
+  const dot = (axisX * outX + axisZ * outZ) / outLen;
+  const offBroadside = (Math.acos(Math.min(1, Math.abs(dot))) * 180) / Math.PI;
   check(
-    "every margin the park keeps is met, measured from the ride's own reach",
-    worst.slack >= COMFORT_SLACK,
-    `tightest is ${worst.what} at ${worst.slack.toFixed(1)} m clear, on a ${OVERALL_REACH.toFixed(1)} m reach`,
+    "it presents itself broadside to the ring path, not end-on",
+    Math.abs(offBroadside - 90) < 1e-6,
+    `${offBroadside.toFixed(4)}deg between its long axis and the line in to the middle`,
   );
 }
-check(
-  "and it hides nothing from the entrance",
-  !hidesARide(rx, rz),
-  `standing at (${rx.toFixed(1)}, ${rz.toFixed(1)})`,
-);
 
 /* ================= 5. NOTHING ELSE MOVED ================= */
 
 check(
-  "the park layout still holds exactly its five solver-placed rides",
-  PARK_LAYOUT.length === 5 && !PARK_LAYOUT.some((r) => r.id === DUMBO_RIDE_ID),
-  PARK_LAYOUT.map((r) => r.id).join(","),
+  /*
+   * THE PROPERTY, not the count. This used to assert that the layout held five
+   * boxes, which was a fair proxy for "adding this ride did not re-solve the
+   * park" while five was all it ever held. The Giga Coaster has since been
+   * listed there — DevOps ride it, and a ride employees are routed to has to be
+   * findable in the layout — so the count moved while the property did not.
+   *
+   * What actually has to hold is that no ride's position depends on any other's
+   * being listed. Every ride in the layout stands on its OWN ring slot, solved
+   * in `parkRing.ts` from the sizes of all ten attractions, so listing one more
+   * cannot shift the rest; and this ride is not listed at all.
+   */
+  "the ride is not in the park layout, and listing one never moves another",
+  !PARK_LAYOUT.some((r) => r.id === DUMBO_RIDE_ID) &&
+    PARK_LAYOUT.every((r) => {
+      const slot = ringCenterOf(r.id as RingRideId);
+      return Math.hypot(r.center[0] - slot[0], r.center[1] - slot[1]) < 1e-9;
+    }),
+  `${PARK_LAYOUT.length} rides in the layout, each on its own ring slot`,
 );
 check(
   "no department was re-routed to it",
@@ -425,11 +500,10 @@ console.log(
     `walking under a parked elephant with ${(FOOT_CLEARANCE - PLINTH_HEIGHT + PLINTH_HEIGHT).toFixed(1)} m of headroom.`,
 );
 console.log(
-  `Standing at (${rx.toFixed(1)}, ${rz.toFixed(1)}) — ${BEHIND_DISTANCE.toFixed(0)} m behind the ` +
-    `UFO Pendulum, ${FAN_ANGLE_DEG}° off the gate's line of sight through it because the Tea Cups ` +
-    `hold that line, with ` +
-    `${Math.min(...slackAt(rx, rz).map((s) => s.slack)).toFixed(1)} m in hand on every margin. ` +
-    `Nothing else moved.`,
+  `Standing at (${rx.toFixed(1)}, ${rz.toFixed(1)}) — slot ${RIDE_SLOT_BEARING.dumbo}deg, `+
+    `${RIDE_RING_RADIUS.toFixed(0)} m out like every other ride, on a `+
+    `${(RIDE_PLOT_RADIUS * 2).toFixed(0)} m platform reached by a `+
+    `${RADIAL_PATH_LENGTH.toFixed(0)} m radial path. Every ride in the park has the same three.`,
 );
 console.log(failures === 0 ? "\nOK: dumbo ride verified." : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

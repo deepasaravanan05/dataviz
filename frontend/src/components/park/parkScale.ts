@@ -39,28 +39,15 @@
  */
 export const PARK_SCALE = 2.0;
 
-/**
- * The park train's loop is scaled harder than the rides it circles.
- *
- * Spreading the attractions far enough apart to give each one a clear visual
- * zone needs more ground than the 1.7x loop encloses, so the loop (and the
- * train riding it, which must scale with its own rails) grows further. The
- * train keeps its proportion to the track exactly as before.
- *
- * 4.6 -> 7.9 BECAUSE THE RIDES GREW. Every ride in the park is now built to one
- * common height, which grew their footprints with them, and at 4.6 the loop no
- * longer went round the park — it went THROUGH the Ferris Wheel, whose box
- * reached the rails exactly. Separating the enlarged silhouettes then spread
- * the fan wider still. 7.9 is the smallest scale at which the loop encircles
- * all five solver-placed rides and clears every one of them by thirty metres;
- * it is solved against the layout rather than chosen, and
- * `verify-park-train.ts` re-measures it.
- *
- * The loop is the only thing that moves here. Ride positions come from the
- * layout solver, and the railway is fitted around them, never the other way
- * about.
+/*
+ * TRAIN_SCALE USED TO LIVE HERE — the factor the park railway's loop and the
+ * train riding it were built at, scaled harder than the rides it circled so it
+ * could go round the outside of them. The train, its track and its route have
+ * been removed from the park, so the factor has gone with them rather than
+ * being left behind for something to import by accident.
  */
-export const TRAIN_SCALE = 7.9;
+
+
 
 /**
  * "Three steps to the left" for the Drop Tower, in world units.

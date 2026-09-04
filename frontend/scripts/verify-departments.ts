@@ -12,16 +12,10 @@ import {
 } from "../src/components/park/departments";
 import { DATASET_DEPARTMENTS } from "../src/simulation/journey/dataset";
 import {
-  TRAIN_RIDE_NAME,
-  TRAIN_TEAM_ID,
-  TRAIN_TEAM_NAME,
-} from "../src/components/park/trainTeam";
-import {
   CHAIRS_SIGN,
   MIN_SIGN_CLEARANCE,
   RIDE_SIGNS,
   TEAM_SIGNS,
-  TRAIN_SIGN,
 } from "../src/components/park/rideSigns";
 import {
   CHAIRS_RIDE_NAME,
@@ -32,9 +26,6 @@ import { CAMERA_PLACES } from "../src/components/world/cameraPlaces";
 import { JOURNEY_EMPLOYEES } from "../src/simulation/journey/journey";
 import { PARK_LAYOUT, rideById } from "../src/components/park/layout";
 import { useRideSelectionStore } from "../src/store/rideSelectionStore";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRACK_HALF_WIDTH_METRES } from "../src/components/park-train/constants";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string) {
@@ -60,8 +51,27 @@ const layout = read("src", "app", "layout.tsx");
  * every dataset department must resolve to a real ride, the Ferris Wheel
  * serves two, and no invented department may survive anywhere.
  */
-check("exactly five department rides", RIDE_DEPARTMENTS.length === 5, `${RIDE_DEPARTMENTS.length}`);
-check("exactly six departments", DEPARTMENTS.length === 6, `${DEPARTMENTS.length}`);
+/*
+ * SIX ROUTING DESTINATIONS, not five. The Giga Coaster joined them when DevOps
+ * was given it to ride — "the devops employees only go and sit on the giga
+ * coaster ride" — and it joined by taking a place in the layout it was already
+ * standing on rather than by anything moving. The COUNT is therefore the
+ * mapping's business; what has to hold is that every destination is a ride the
+ * park actually has, and that each of them serves somebody.
+ */
+check(
+  "every routing destination is a ride the park has, and none is empty",
+  RIDE_DEPARTMENTS.length === RIDE_ORDER.length &&
+    RIDE_DEPARTMENTS.every((r) => PARK_LAYOUT.some((p) => p.id === r.rideId)),
+  RIDE_DEPARTMENTS.map((r) => r.rideId).join(", "),
+);
+/* HOW MANY is the workbook's business, not this module's — it was six and is
+   now thirteen. What has to hold is that every one of them is mapped. */
+check(
+  "every department the workbook names is mapped",
+  DEPARTMENTS.length === DATASET_DEPARTMENTS.length,
+  `${DEPARTMENTS.length} of ${DATASET_DEPARTMENTS.length}`,
+);
 for (const d of DATASET_DEPARTMENTS) {
   check(`${d} is mapped to a ride`, DEPARTMENTS.some((r) => r.department === d), d);
 }
@@ -81,21 +91,40 @@ check(
   RIDE_DEPARTMENTS.map((r) => `${r.rideId}:${r.departments.length}`).join(", "),
 );
 check(
-  "departments the roster dropped are gone — no DEVOPS, Finance or Operations",
-  ["DEVOPS", "Finance", "Operations"].every((gone) =>
-    DEPARTMENTS.every((d) => d.department !== gone),
-  ),
-  "only the six departments the attendance sheet names",
+  "the roster is the workbook's, and only the workbook's",
+  DEPARTMENTS.length === DATASET_DEPARTMENTS.length &&
+    DEPARTMENTS.every((d) => DATASET_DEPARTMENTS.includes(d.department)),
+  `${DEPARTMENTS.length} departments, all of them named by data/final one.xlsx`,
 );
 
-// The pairings, using this park's actual ride names.
+/*
+ * THE PAIRINGS, using this park's actual ride names.
+ *
+ * The workbook spells its departments in lower case and in short form, and
+ * brings six the park had never heard of. No ride assignment changed to absorb
+ * them: the six the park already served keep the ride they had, and the six new
+ * ones are taken by existing attractions in first-seen order — the same
+ * round-robin `resolveDepartmentRides` has always applied to a department it
+ * does not recognise. This table is that outcome, written out, so a shuffle
+ * would fail rather than pass quietly.
+ */
 const EXPECTED: [string, string][] = [
-  ["Tech", "Roller Coaster"],
-  ["Cyber Security", "Dragon Ride"],
-  ["Data Engineering", "UFO Pendulum"],
-  ["ERP", "Monster Ride"],
-  ["IT Support", "Ferris Wheel"],
-  ["UI/UX", "Ferris Wheel"],
+  /* The departments the park already served, in the workbook's spelling. */
+  ["dev", "Ferris Wheel"],
+  ["testing", "Roller Coaster"],
+  ["cyber", "Dragon Ride"],
+  ["erp", "Monster Ride"],
+  ["data", "UFO Pendulum"],
+  ["it support", "Ferris Wheel"],
+  ["design", "Ferris Wheel"],
+  /* DevOps was given the Giga Coaster to ride, at the user's word. */
+  ["devops", "Giga Coaster"],
+  /* The rest of the new departments, absorbed by rides that already had one. */
+  ["risk", "Dragon Ride"],
+  ["pm", "Ferris Wheel"],
+  ["ml", "UFO Pendulum"],
+  ["admin", "Monster Ride"],
+  ["finance", "Roller Coaster"],
 ];
 for (const [dept, ride] of EXPECTED) {
   const found = rideForDepartment(dept);
@@ -110,19 +139,20 @@ check(
 /*
  * WHAT THE SIGNS SAY.
  *
- * The user set the park's own names for the rides, and two of them differ from
- * the departments underneath: the Roller Coaster serves Tech and is signed
- * "Testing", and the Ferris Wheel serves IT Support and UI/UX and is signed
- * "Developers" rather than joining both. So what is asserted is the property
- * that actually has to hold — each sign carries the requested name, and each
- * ride is still SERVING the same real departments underneath it.
+ * The user set the park's own names for two of the rides — the Roller Coaster
+ * is signed "Testing" and the Ferris Wheel "Developers" — and the other three
+ * join the departments they serve. So what is asserted is the property that
+ * actually has to hold: each sign carries the requested name, and each ride is
+ * still SERVING the real departments underneath it.
  */
 const SIGN_NAMES: [DepartmentRideId, string, string[]][] = [
-  ["coaster", "Testing", ["Tech"]],
-  ["dragon", "Cyber Security", ["Cyber Security"]],
-  ["ferris", "Developers", ["IT Support", "UI/UX"]],
-  ["ufo", "Data Engineering", ["Data Engineering"]],
-  ["monster", "ERP", ["ERP"]],
+  ["coaster", "Testing", ["testing", "finance"]],
+  ["dragon", "cyber · risk", ["cyber", "risk"]],
+  ["ferris", "Developers", ["dev", "it support", "pm", "design"]],
+  ["ufo", "data · ml", ["data", "ml"]],
+  ["monster", "erp · admin", ["erp", "admin"]],
+  /* The Giga Coaster prints the one department it serves. */
+  ["giga", "devops", ["devops"]],
 ];
 for (const [rideId, sign, serves] of SIGN_NAMES) {
   check(
@@ -150,38 +180,19 @@ check(
           .map((d) => d.department)
           .join(",") === serves.join(","),
     ),
-  "Tech, IT Support and UI/UX people still read as Tech, IT Support and UI/UX",
+  "a devops employee still reads as devops, and every other department keeps its own name",
 );
 
-/* ---- The Park Train carries a team NAME, not a department ---- */
 /*
- * The user's mapping gives the train DevOps. It is a label: the train must
- * appear on the team-name surfaces and must NOT appear anywhere that routes,
- * seats or counts an employee — putting a ride whose track rings the whole
- * park into the layout would move every other ride.
+ * THE PARK TRAIN'S TEAM SECTION IS GONE, with the train.
+ *
+ * Four checks stood here: that the train was NOT a department ride, that no
+ * employee was routed to it, that its board read DevOps, and that the board
+ * cleared everything the ride signs must clear. The train, its track and its
+ * route have been removed from the park at the user's request, so all four
+ * have nothing left to be about — and DevOps, which was only ever a label on
+ * that board, is no longer shown anywhere in the park.
  */
-check(
-  "the train is NOT a department ride",
-  !RIDE_ORDER.includes(TRAIN_TEAM_ID as unknown as DepartmentRideId) &&
-    !RIDE_DEPARTMENTS.some((r) => (r.rideId as string) === TRAIN_TEAM_ID) &&
-    !PARK_LAYOUT.some((r) => (r.id as string) === TRAIN_TEAM_ID),
-  "absent from RIDE_ORDER, RIDE_DEPARTMENTS and PARK_LAYOUT",
-);
-check(
-  "no employee is routed to the train",
-  JOURNEY_EMPLOYEES.every((e) => (e.rideId as string) !== TRAIN_TEAM_ID),
-  `${JOURNEY_EMPLOYEES.length} employees, none bound for the train`,
-);
-check(
-  "the train has a signboard beside its own rails, reading DevOps",
-  TRAIN_SIGN.department === TRAIN_TEAM_NAME && TRAIN_SIGN.rideName === TRAIN_RIDE_NAME,
-  `"${TRAIN_SIGN.department}" — ${TRAIN_SIGN.rideName} at (${TRAIN_SIGN.position[0].toFixed(0)}, ${TRAIN_SIGN.position[1].toFixed(0)})`,
-);
-check(
-  "the train's sign clears everything the ride signs must clear",
-  TRAIN_SIGN.clearance >= MIN_SIGN_CLEARANCE,
-  `clearance ${TRAIN_SIGN.clearance.toFixed(2)} >= ${MIN_SIGN_CLEARANCE}`,
-);
 /* ---- The Flying Chairs carry a team NAME too ---- */
 /*
  * The user named the ride that then stood behind the Drop Tower: "behind the
@@ -202,13 +213,14 @@ check(
   JOURNEY_EMPLOYEES.every((e) => (e.rideId as string) !== CHAIRS_TEAM_ID),
   `${JOURNEY_EMPLOYEES.length} employees, none bound for the Flying Chairs`,
 );
+/* The sign moved; the people did not. Written against the workbook's own
+   spelling of the department, and asserting the property rather than a head
+   count that changes with the date on screen. */
+const IT_SUPPORT = JOURNEY_EMPLOYEES.filter((e) => e.department === "it support");
 check(
-  "IT Support staff still walk to the Ferris Wheel, as they always did",
-  JOURNEY_EMPLOYEES.filter((e) => e.department === "IT Support").length === 5 &&
-    JOURNEY_EMPLOYEES.filter((e) => e.department === "IT Support").every(
-      (e) => e.rideId === "ferris",
-    ),
-  "5 IT Support employees, all routed to the Ferris Wheel — the sign moved, the people did not",
+  "IT support staff still walk to the Ferris Wheel, as they always did",
+  IT_SUPPORT.every((e) => e.rideId === "ferris"),
+  `${IT_SUPPORT.length} it support employees, all routed to the Ferris Wheel`,
 );
 check(
   "the Flying Chairs have a signboard reading IT Support",
@@ -297,34 +309,9 @@ const SOLVED_SIGN_POSITIONS: Record<string, [number, number]> = {
  * and that is what is checked here and below.
  */
 check(
-  "the train's board still stands beside the railway it names",
-  Number.isFinite(TRAIN_SIGN.position[0]) && Number.isFinite(TRAIN_SIGN.position[1]),
-  `(${TRAIN_SIGN.position[0].toFixed(2)}, ${TRAIN_SIGN.position[1].toFixed(2)})`,
-);
-{
-  /* And the reason it moved holds: it is off the track, not merely near it. */
-  let rails = Infinity;
-  for (let i = 0; i <= 2000; i++) {
-    const p = TRACK_CURVE.getPointAt(i / 2000);
-    rails = Math.min(
-      rails,
-      Math.hypot(
-        TRAIN_SIGN.position[0] - p.x * TRAIN_SCALE,
-        TRAIN_SIGN.position[1] - p.z * TRAIN_SCALE,
-      ),
-    );
-  }
-  check(
-    "and it stands clear of the rails rather than between them",
-    rails > TRACK_HALF_WIDTH_METRES,
-    `${rails.toFixed(1)} m from the centre line, sleepers reach ${TRACK_HALF_WIDTH_METRES.toFixed(1)} m`,
-  );
-}
-check(
-  "all seven teams are reachable by fast travel, each labelled with its own name",
+  "every team is reachable by fast travel, each labelled with its own name",
   [
     ...SIGN_NAMES.map(([id, name]) => [id as string, name] as const),
-    [TRAIN_TEAM_ID as string, TRAIN_TEAM_NAME] as const,
     [CHAIRS_TEAM_ID as string, CHAIRS_TEAM_NAME] as const,
   ].every(
     ([id, name]) => CAMERA_PLACES.some((p) => p.id === id && p.label.startsWith(`${name} — `)),
@@ -337,12 +324,23 @@ check(
  * The Drop Tower was removed at the user's explicit request and the UFO
  * Pendulum put in its place — its plot, its department and its slot in this
  * list. The check is still worth making, because what it was really guarding
- * against is the ROSTER driving the park: five rides before and five after,
- * with the same four untouched, and no department gained, lost or split.
+ * against is the ROSTER driving the park: rides do not appear, disappear or
+ * change places because of who happens to be in the attendance file.
+ *
+ * ONE HAS SINCE BEEN ADDED, and by the opposite route: the user asked for it
+ * by name. The Giga Coaster was already built, already standing on its own ring
+ * slot and already the size it is; what it gained was a place in the routing
+ * system, so DevOps could walk to it and get in.
  */
 check(
-  "still five department rides, four of them untouched by the swap",
-  RIDE_DEPARTMENTS.map((r) => r.rideId).join(",") === "coaster,dragon,ferris,ufo,monster",
+  /*
+   * The Giga Coaster was APPENDED to this list rather than inserted, and the
+   * five that were here are in the order they always were. That matters twice
+   * over: the round-robin that absorbs an unknown department deals from this
+   * order, and the paving, the panel and the dashboard all read it.
+   */
+  "the five original department rides are untouched, and the sixth is appended",
+  RIDE_DEPARTMENTS.map((r) => r.rideId).join(",") === "coaster,dragon,ferris,ufo,monster,giga",
   RIDE_DEPARTMENTS.map((r) => `${r.rideId}=${r.rideName}`).join(", "),
 );
 
@@ -378,8 +376,8 @@ check(
   const second = useRideSelectionStore.getState().selected;
   check(
     "selecting another ride replaces the first — never two at once",
-    second?.department === "Cyber Security",
-    `Tech -> ${second?.department}`,
+    second?.department === departmentFor("dragon").department,
+    `Testing -> ${second?.department}`,
   );
   check(
     "the store holds a single selection, not a list",
@@ -527,7 +525,7 @@ check(
 // ============ 8. Nothing is paused ============
 check(
   "no ride component reads the selection store",
-  ["roller-coaster", "ferris-wheel", "monster-ride", "park-train", "dragon-ride", "ufo-pendulum"].every(
+  ["roller-coaster", "ferris-wheel", "monster-ride", "dragon-ride", "ufo-pendulum"].every(
     (dir) =>
       !readFileSync(join(root, "src", "components", dir, "constants.ts"), "utf8").includes(
         "rideSelectionStore",
@@ -539,7 +537,6 @@ for (const [file, label] of [
   ["src/components/ferris-wheel/FerrisWheel.tsx", "Ferris Wheel"],
   ["src/components/dragon-ride/DragonRide.tsx", "Dragon Ride"],
   ["src/components/ufo-pendulum/UfoPendulum.tsx", "UFO Pendulum"],
-  ["src/components/park-train/ParkTrain.tsx", "Park Train"],
 ] as const) {
   const text = read(...file.split("/"));
   check(

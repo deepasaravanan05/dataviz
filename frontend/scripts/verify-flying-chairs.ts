@@ -5,7 +5,6 @@ import {
   ARM_THICKNESS,
   ARM_TIP_DROP,
   BASE_SKIRT_RADIUS,
-  BEHIND_DISTANCE,
   CANOPY_RADIUS,
   CHAIR_FOOT_DROP,
   CHAIR_SCALE,
@@ -23,7 +22,6 @@ import {
   GUSSET_TOP_Y,
   HANGER_RADIUS,
   HUB_Y,
-  LADDER_AZIMUTH,
   LADDER_CAGE_RADIUS,
   LADDER_GATE_ARC,
   LADDER_RADIUS,
@@ -40,7 +38,6 @@ import {
   PLATFORM_Y,
   RAIL_HEIGHT,
   RIDER_SPEED,
-  RIDE_CENTER,
   ROTATION_RADIANS_PER_SEC,
   ROTATION_RPM,
   ROTATION_SIGN,
@@ -56,6 +53,24 @@ import {
   validateFlyingChairs,
 } from "../src/components/flying-chairs/constants";
 import {
+  LADDER_AZIMUTH,
+  RIDE_CENTER,
+} from "../src/components/flying-chairs/placement";
+import {
+  LAKE_CLEARANCE_RADIUS,
+  PARK_ORIGIN,
+  RADIAL_PATH_LENGTH,
+  RIDE_PLOT_RADIUS,
+  RIDE_RING_RADIUS,
+  RIDE_SLOT_BEARING,
+  radialStart,
+  rideEntrance,
+  PLOT_MARGIN,
+  ringRadiusOf,
+  ringCenterOf,
+  type RingRideId,
+} from "../src/components/park/parkRing";
+import {
   CRUISE_SECONDS,
   CYCLE_SECONDS,
   HOIST_SECONDS,
@@ -68,27 +83,20 @@ import {
 import { LAY_FLAT } from "../src/components/flying-chairs/parts";
 import { SEAT_PLACEMENTS, neighbourGap } from "../src/components/flying-chairs/seatRing";
 import {
-  MAIN_VIEWPOINT,
-  PARK_CENTER,
   PARK_LAYOUT,
   PLAZA_CENTER,
   PLAZA_RADIUS,
   rideById,
-  viewAngles,
 } from "../src/components/park/layout";
 import { RIDE_SIGNS } from "../src/components/park/rideSigns";
 import { placeById } from "../src/components/world/cameraPlaces";
 import { CHAIRS_SIGN } from "../src/components/park/rideSigns";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
-import { distanceToPaving } from "../src/components/world/paths";
+import { RIDE_PLOTS, type RidePlot } from "../src/components/world/paths";
 import { PARK_SHRUBS, PARK_TREES } from "../src/components/world/planting";
 import { JOURNEY_EMPLOYEES } from "../src/simulation/journey/journey";
 import {
   FOOD_COURT_CENTER,
   FOOD_COURT_HALF,
-  GATE_X,
-  GATE_Z,
 } from "../src/simulation/journey/constants";
 import { HUMAN } from "../src/world/scale";
 
@@ -339,11 +347,18 @@ check(
    * Twenty seats that are present, correct and sub-pixel are not twenty seats
    * anybody can see, and that is exactly how the first build of this ride came
    * out. So the chairs' apparent size is measured from a viewpoint the user
-   * really uses — the fast-travel place for whatever stands on the plot next
-   * door, which is the UFO Pendulum since the Drop Tower was removed — through
-   * the park's own 46-degree camera on a 900-pixel-tall frame.
+   * really uses, through the park's own 46-degree camera on a 900-pixel-tall
+   * frame.
+   *
+   * WHICH VIEWPOINT CHANGED WITH THE PLAN. It used to be the fast-travel place
+   * for the ride on the plot next door, on the argument that a neighbour is
+   * the nearest a visitor stands. The park is radially symmetric now and every
+   * ride is 443 m from its neighbour — over a kilometre from that camera — so
+   * the neighbour's viewpoint measures nothing about this ride any more. The
+   * viewpoint that matters is THIS ride's own fast-travel place, which is
+   * where anybody who wants to look at it actually stands.
    */
-  const view = placeById("ufo");
+  const view = placeById(CHAIRS_TEAM_ID);
   const nearest = SEAT_PLACEMENTS.map((p) =>
     Math.hypot(
       rx + p.seat[0] - view.position[0],
@@ -431,120 +446,110 @@ check(
   );
 }
 
-/* ================= 5. BEHIND THE FOOD COURT ================= */
+/* ================= 5. ITS SLOT ON THE PARK RING ================= */
 
+/*
+ * THE BRIEF THAT PUT THIS RIDE HERE HAS CHANGED, and the checks change with it
+ * rather than being deleted.
+ *
+ * It used to be "behind the food court": the placement pushed the ride out
+ * along the gate's bearing through the court until the ground would take it,
+ * and this section asserted the decomposition of that offset — the whole of
+ * BEHIND_DISTANCE along the bearing and nothing at all across it — because a
+ * mistake that preserves the distance is exactly the kind a length check
+ * misses.
+ *
+ * The park is a ring now and every attraction has a numbered slot on it, so
+ * what is worth asserting is the same property in the new frame: the ride
+ * stands exactly on its slot bearing and at exactly the radius the ring gives
+ * it, with nothing across the bearing. Same test, new anchor.
+ */
 {
-  const toCourt = [FOOD_COURT_CENTER[0] - GATE_X, FOOD_COURT_CENTER[1] - GATE_Z];
-  const toRide = [rx - GATE_X, rz - GATE_Z];
-  const lenC = Math.hypot(toCourt[0], toCourt[1]);
-  const lenR = Math.hypot(toRide[0], toRide[1]);
-  const cos = (toCourt[0] * toRide[0] + toCourt[1] * toRide[1]) / (lenC * lenR);
-  const offBearing = (Math.acos(Math.min(1, cos)) * 180) / Math.PI;
+  const dx = RIDE_CENTER[0] - PARK_ORIGIN[0];
+  const dz = RIDE_CENTER[1] - PARK_ORIGIN[1];
+  const radius = Math.hypot(dx, dz);
+  const bearing = (Math.atan2(dx, dz) * 180) / Math.PI;
 
   check(
-    "it is FURTHER from the gate than the food court — behind it, not in front",
-    lenR > lenC,
-    `ride ${lenR.toFixed(1)} m from the gate, food court ${lenC.toFixed(1)} m`,
-  );
-
-  /*
-   * WHERE EXACTLY.
-   *
-   * The offset from the court's centre must be the whole of BEHIND_DISTANCE
-   * along the gate→court bearing and nothing across it. Asserting the
-   * decomposition rather than the straight-line distance is what makes a
-   * mistake in either direction visible, including one that happens to
-   * preserve the length — which is how that first placement was checked, and
-   * the reason it is worth keeping now that the anchor has moved.
-   */
-  const alongX = (toCourt[0] / lenC) * BEHIND_DISTANCE;
-  const alongZ = (toCourt[1] / lenC) * BEHIND_DISTANCE;
-  const residualX = rx - FOOD_COURT_CENTER[0] - alongX;
-  const residualZ = rz - FOOD_COURT_CENTER[1] - alongZ;
-  check(
-    `it stands exactly ${BEHIND_DISTANCE} m behind the food court, dead on its bearing`,
-    Math.abs(residualX) < 1e-9 && Math.abs(residualZ) < 1e-9 && offBearing < 1e-9,
-    `residual (${residualX.toExponential(1)}, ${residualZ.toExponential(1)}), ` +
-      `${offBearing.toExponential(1)}° off the gate→court line`,
+    "it stands exactly on its slot bearing, with nothing across it",
+    Math.abs(bearing - RIDE_SLOT_BEARING.chairs) < 1e-9,
+    `${bearing.toFixed(6)}deg against the plan's ${RIDE_SLOT_BEARING.chairs}deg`,
   );
   check(
-    "and it is out past the far side of the court, not standing in it",
-    Math.hypot(
-      Math.max(Math.abs(rx - FOOD_COURT_CENTER[0]) - FOOD_COURT_HALF, 0),
-      Math.max(Math.abs(rz - FOOD_COURT_CENTER[1]) - FOOD_COURT_HALF, 0),
-    ) > OVERALL_REACH,
-    `${Math.hypot(
-      Math.max(Math.abs(rx - FOOD_COURT_CENTER[0]) - FOOD_COURT_HALF, 0),
-      Math.max(Math.abs(rz - FOOD_COURT_CENTER[1]) - FOOD_COURT_HALF, 0),
-    ).toFixed(1)} m from the court's edge, ride reach ${OVERALL_REACH.toFixed(1)} m`,
-  );
-
-  const angles = viewAngles(MAIN_VIEWPOINT, PARK_CENTER);
-  const ux = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
-  const uz = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
-  const ul = Math.hypot(ux, uz) || 1;
-  const slice = (x: number, z: number, reach: number) => {
-    const dx = x - MAIN_VIEWPOINT[0];
-    const dz = z - MAIN_VIEWPOINT[1];
-    const distance = Math.hypot(dx, dz) || 1;
-    const bearing =
-      (Math.atan2((ux / ul) * dz - (uz / ul) * dx, dx * (ux / ul) + dz * (uz / ul)) * 180) /
-      Math.PI;
-    const half = (Math.atan(reach / distance) * 180) / Math.PI;
-    return [bearing - half, bearing + half] as const;
-  };
-
-  const [rideFrom, rideTo] = slice(rx, rz, OVERALL_REACH);
-  /* The court is a square, so what it subtends is set by its half-diagonal. */
-  const [courtFrom, courtTo] = slice(
-    FOOD_COURT_CENTER[0],
-    FOOD_COURT_CENTER[1],
-    FOOD_COURT_HALF * Math.SQRT2,
+    "and at exactly the ring radius — the same as every other ride",
+    Math.abs(radius - RIDE_RING_RADIUS) < 1e-9 && Math.abs(radius - ringRadiusOf()) < 1e-9,
+    `${radius.toFixed(3)} m from the middle, and there is only one such radius`,
   );
   check(
-    "from the entrance it stands squarely within the food court's own slice of the view",
-    rideFrom > courtFrom && rideTo < courtTo,
-    `ride ${rideFrom.toFixed(2)}°..${rideTo.toFixed(2)}°, court ${courtFrom.toFixed(2)}°..${courtTo.toFixed(2)}°`,
+    "its platform is the park's one plot size, and its machine fits inside it",
+    RIDE_PLOT_RADIUS >= OVERALL_REACH,
+    `a ${(RIDE_PLOT_RADIUS * 2).toFixed(0)} m platform holding a ${(OVERALL_REACH * 2).toFixed(0)} m ride`,
   );
-
-  const overlaps = angles.filter(
-    (a) => rideTo > a.bearingDeg - a.halfWidthDeg && rideFrom < a.bearingDeg + a.halfWidthDeg,
-  );
-  /*
-   * SHARING A BEARING IS NOT HIDING — you have to be in FRONT.
-   *
-   * This asked for no angular overlap at all, which was achievable while the
-   * park was compact and this ride sat close behind the court. Every ride is
-   * now built to one common height, the fan is far wider, and the ride stands
-   * 297 m out: from the entrance its slice necessarily crosses a ride that is
-   * nearer the gate than it is. That is the same rule every other attraction
-   * in this park is placed by — the Tea Cups, the Super Looper, the Giga
-   * Coaster and the Dumbo Ride all test whether they stand in front of
-   * something — and the ride's own placement now solves against it.
-   */
-  const inFront = overlaps.filter(
-    (a) =>
-      Math.hypot(rx - MAIN_VIEWPOINT[0], rz - MAIN_VIEWPOINT[1]) <
-      Math.hypot(
-        rideById(a.id).center[0] - MAIN_VIEWPOINT[0],
-        rideById(a.id).center[1] - MAIN_VIEWPOINT[1],
-      ),
+  const entrance = rideEntrance("chairs");
+  const start = radialStart("chairs");
+  check(
+    "its radial path runs down its own bearing, from the food court to its entrance",
+    Math.abs(
+      Math.atan2(start[0] - PARK_ORIGIN[0], start[1] - PARK_ORIGIN[1]) -
+        Math.atan2(entrance[0] - PARK_ORIGIN[0], entrance[1] - PARK_ORIGIN[1]),
+    ) < 1e-9,
+    `entrance at (${entrance[0].toFixed(1)}, ${entrance[1].toFixed(1)})`,
   );
   check(
-    "and it hides no ride — where it shares a bearing it stands behind, not in front",
-    inFront.length === 0,
-    `in front of ${inFront.map((o) => o.id).join(", ") || "nothing"}; shares a bearing with ` +
-      `${overlaps.map((o) => o.id).join(", ") || "nothing"}; ` +
-      `nearest slice ${angles.map((a) => `${a.id} ${(a.bearingDeg - a.halfWidthDeg).toFixed(1)}..${(a.bearingDeg + a.halfWidthDeg).toFixed(1)}`).join(", ")}`,
+    "and it is the same length as every other radial in the park",
+    Math.abs(Math.hypot(entrance[0] - start[0], entrance[1] - start[1]) - RADIAL_PATH_LENGTH) < 1e-6,
+    `${Math.hypot(entrance[0] - start[0], entrance[1] - start[1]).toFixed(1)} m, ` +
+      `against a plan length of ${RADIAL_PATH_LENGTH.toFixed(1)} m`,
+  );
+  check(
+    "it is clear of the food court in the middle of the park",
+    radius - OVERALL_REACH > LAKE_CLEARANCE_RADIUS,
+    `inner edge ${(radius - OVERALL_REACH).toFixed(0)} m out, court ${LAKE_CLEARANCE_RADIUS} m`,
   );
 }
+
+/*
+ * THE SIGHTLINE CHECKS THAT USED TO SIT HERE ARE GONE, and it is worth saying
+ * why rather than leaving a gap.
+ *
+ * Two things were asserted from the main entrance: that this ride sat inside
+ * the food court's own slice of the view, and that where it shared a bearing
+ * with a department ride it stood BEHIND that ride rather than in front. Both
+ * were properties of a park laid out as a fan in front of its gate, and both
+ * were maintained by this ride's own outward search.
+ *
+ * A concentric park cannot keep either, and not because anything regressed:
+ * five of its ten attractions are on the far side of the lake from the
+ * entrance and five are on the near side, so from the gate the near ones stand
+ * in front of the far ones by construction. That is what a ring IS. The park
+ * is read from above, and the property that replaces these — that every
+ * attraction holds its own share of the overview frame — is measured through
+ * the real camera in `verify-night.ts`, which is the only place it can be
+ * measured honestly.
+ */
 
 /* ================= 6. NOTHING ELSE MOVED ================= */
 
 check(
-  "the ride is not in the park layout — the solver was never re-run",
-  PARK_LAYOUT.length === 5 && !PARK_LAYOUT.some((r) => (r.id as string).includes("chair")),
-  `${PARK_LAYOUT.length} rides in the solver, as before`,
+  /*
+   * THE PROPERTY, not the count. This used to assert that the layout held five
+   * boxes, which was a fair proxy for "adding this ride did not re-solve the
+   * park" while five was all it ever held. The Giga Coaster has since been
+   * listed there — DevOps ride it, and a ride employees are routed to has to be
+   * findable in the layout — so the count moved while the property did not.
+   *
+   * What actually has to hold is that no ride's position depends on any other's
+   * being listed. Every ride in the layout stands on its OWN ring slot, solved
+   * in `parkRing.ts` from the sizes of all ten attractions, so listing one more
+   * cannot shift the rest; and this ride is not listed at all.
+   */
+  "the ride is not in the park layout, and listing one never moves another",
+  !PARK_LAYOUT.some((r) => (r.id as string).includes("chair")) &&
+    PARK_LAYOUT.every((r) => {
+      const slot = ringCenterOf(r.id as RingRideId);
+      return Math.hypot(r.center[0] - slot[0], r.center[1] - slot[1]) < 1e-9;
+    }),
+  `${PARK_LAYOUT.length} rides in the layout, each on its own ring slot`,
 );
 check(
   "and the layout module does not know it exists",
@@ -569,11 +574,6 @@ check(
 
 /* ================= 7. IT CLEARS EVERYTHING ================= */
 
-const rails: [number, number][] = [];
-for (let i = 0; i <= 720; i++) {
-  const p = TRACK_CURVE.getPointAt(i / 720);
-  rails.push([p.x * TRAIN_SCALE, p.z * TRAIN_SCALE]);
-}
 function boxDistance(x: number, z: number, r: (typeof PARK_LAYOUT)[number]): number {
   return Math.hypot(
     Math.max(r.minX - x, 0, x - r.maxX),
@@ -581,15 +581,13 @@ function boxDistance(x: number, z: number, r: (typeof PARK_LAYOUT)[number]): num
   );
 }
 
+
 const toBox = Math.min(...PARK_LAYOUT.map((r) => boxDistance(rx, rz, r)));
-const toRail = Math.min(...rails.map(([x, z]) => Math.hypot(rx - x, rz - z)));
 const toSign = Math.min(...RIDE_SIGNS.map((s) => Math.hypot(rx - s.position[0], rz - s.position[1])));
 
 for (const [what, distance, margin] of [
   ["every ride footprint", toBox, 12],
-  ["the railway", toRail, 10],
   ["every department sign", toSign, 8],
-  ["the paving", distanceToPaving(rx, rz), 6],
   ["the plaza ring", Math.abs(Math.hypot(rx - PLAZA_CENTER[0], rz - PLAZA_CENTER[1]) - PLAZA_RADIUS), 8],
   [
     "the food court",
@@ -604,6 +602,30 @@ for (const [what, distance, margin] of [
     `it clears ${what}`,
     distance >= OVERALL_REACH + margin,
     `${distance.toFixed(1)} m — needs ${(OVERALL_REACH + margin).toFixed(1)} (reach ${OVERALL_REACH.toFixed(1)} + ${margin})`,
+  );
+}
+
+/*
+ * IT STANDS ON A PAVED PLATFORM — which is why "it clears the paving" is gone.
+ *
+ * That row required six metres of open grass between this ride and any paved
+ * surface, so the machine read as standing IN the park rather than ON a path.
+ * The master plan reverses it in as many words: every attraction stands in the
+ * middle of an identical circular platform, and the paths "must reach the ride
+ * entrance/platform clearly and completely". The paving under this ride is the
+ * plan, not an encroachment.
+ *
+ * What the old row protected — that the ride is not overhanging the surface it
+ * sits on — is asserted directly instead, against the plan's own plot size.
+ */
+{
+  const plot = RIDE_PLOTS.find((p: RidePlot) => p.id === "chairs")!;
+  check(
+    "it stands centred on its own platform, with room to spare",
+    Math.hypot(rx - plot.center[0], rz - plot.center[1]) < 1e-9 &&
+      OVERALL_REACH + PLOT_MARGIN <= plot.radius + 1e-9,
+    `a ${(plot.radius * 2).toFixed(0)} m platform under a ${(OVERALL_REACH * 2).toFixed(0)} m ride, ` +
+      `${(plot.radius - OVERALL_REACH).toFixed(0)} m of platform showing all round`,
   );
 }
 /*
@@ -626,10 +648,10 @@ for (const [what, distance, margin] of [
   );
   check(
     "it stands on the gate's own line through the food court, and clears everything else",
-    Math.min(toBox, toRail, toSign) > OVERALL_REACH,
+    Math.min(toBox, toSign) > OVERALL_REACH,
     `food court ${toCourtBox.toFixed(0)} m; nearest ride ` +
       `${PARK_LAYOUT.slice().sort((a, b) => boxDistance(rx, rz, a) - boxDistance(rx, rz, b))[0].id} ` +
-      `${toBox.toFixed(0)} m, railway ${toRail.toFixed(0)} m, nearest sign ${toSign.toFixed(0)} m`,
+      `${toBox.toFixed(0)} m, nearest sign ${toSign.toFixed(0)} m`,
   );
 }
 {
@@ -897,11 +919,19 @@ check(
     `${Math.min(...HULLS.map((h) => h.minRadius)).toFixed(2)} m`,
 );
 {
-  const toGate = Math.atan2(GATE_Z - rz, GATE_X - rx);
+  /*
+   * IT USED TO FACE THE MAIN GATE, on the argument that a visitor arrives from
+   * that side. That was true of a park laid out in front of its entrance; on a
+   * ring it is true of two rides out of ten and false for the eight at the
+   * back. What holds for all of them is that people step off the RING PATH,
+   * which is inside — so the ladder faces the middle of the park, and the
+   * bearing is still taken rather than typed.
+   */
+  const toMiddle = Math.atan2(PARK_ORIGIN[1] - rz, PARK_ORIGIN[0] - rx);
   check(
-    "and it is on the side a visitor arrives from — the bearing is taken from the gate, not typed",
-    Math.abs(LADDER_AZIMUTH - toGate) < 1e-12,
-    `${((LADDER_AZIMUTH * 180) / Math.PI).toFixed(1)}° — square on the line back to the main gate`,
+    "and it is on the side a visitor arrives from — square on the line back to the ring path",
+    Math.abs(LADDER_AZIMUTH - toMiddle) < 1e-12,
+    `${((LADDER_AZIMUTH * 180) / Math.PI).toFixed(1)}° — straight at the middle of the park`,
   );
 }
 
@@ -970,15 +1000,16 @@ console.log(
     `clockwise at ${ROTATION_RPM} rpm (${(RIDER_SPEED * 3.6).toFixed(0)} km/h).`,
 );
 console.log(
-  `Standing at (${rx.toFixed(1)}, ${rz.toFixed(1)}) — ${BEHIND_DISTANCE} m behind the food court on its own ` +
-    `bearing from the gate, ${toBox.toFixed(1)} m clear of the nearest footprint ` +
+  `Standing at (${rx.toFixed(1)}, ${rz.toFixed(1)}) — on the park ring at ` +
+    `${RIDE_SLOT_BEARING.chairs}deg, ${ringRadiusOf("chairs").toFixed(0)} m out from the lake, ` +
+    `${toBox.toFixed(1)} m clear of the nearest footprint ` +
     `(reach ${OVERALL_REACH.toFixed(1)} m, chair ${(SEAT_DEPTH * CHAIR_SCALE).toFixed(2)} m deep).`,
 );
 console.log(
   `Loading: the sweep drops ${LIFT_TRAVEL.toFixed(1)} m to a ${PLATFORM_Y.toFixed(2)} m gallery ` +
     `(${PLATFORM_INNER_RADIUS}..${PLATFORM_OUTER_RADIUS} m), stands still for ` +
     `${LOAD_SECONDS + UNLOAD_SECONDS}s of every ${CYCLE_SECONDS}s, and is reached by a ` +
-    `${LADDER_RUNG_COUNT}-rung caged ladder facing the gate.`,
+    `${LADDER_RUNG_COUNT}-rung caged ladder facing the ring path.`,
 );
 console.log(failures === 0 ? "\nOK: flying chairs verified." : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -5,7 +5,6 @@ import {
   PARK_LAYOUT,
   PLAZA_CENTER,
   PLAZA_RADIUS,
-  rideById,
   viewAngles,
 } from "./layout";
 import { JOURNEY_EMPLOYEES } from "@/simulation/journey/journey";
@@ -16,19 +15,21 @@ import {
   GATE_X,
   GATE_Z,
 } from "@/simulation/journey/constants";
-import { TRACK_CURVE } from "@/components/park-train/trainTrack";
-import { TRACK_CENTER } from "@/components/park-train/constants";
-import { TRAIN_RIDE_NAME, TRAIN_TEAM_ID, TRAIN_TEAM_NAME, type TrainTeamId } from "./trainTeam";
+import {
+  PARK_ORIGIN,
+  RADIAL_PATH_WIDTH,
+  RIDE_SLOT_BEARING,
+  rideEntrance,
+  type RingRideId,
+} from "@/components/park/parkRing";
 import {
   CHAIRS_RIDE_NAME,
   CHAIRS_TEAM_ID,
   CHAIRS_TEAM_NAME,
   OVERALL_REACH as CHAIRS_REACH,
-  RIDE_CENTER as CHAIRS_CENTER,
   type ChairsTeamId,
 } from "@/components/flying-chairs/constants";
-import { TRAIN_SCALE } from "./parkScale";
-import { TRACK_HALF_WIDTH_METRES } from "@/components/park-train/constants";
+import { RIDE_CENTER as CHAIRS_CENTER } from "@/components/flying-chairs/placement";
 import { SIGN } from "@/world/scale";
 /*
  * TYPE ONLY, and deliberately so. The Super Looper's placement reads
@@ -53,7 +54,7 @@ import type { DumboRideId } from "@/components/dumbo-ride/constants";
  *
  * So the placement is searched rather than typed. Everything it is measured
  * against is read from the modules that own it — `PARK_LAYOUT` for the ride
- * boxes, `TRACK_CURVE` for the rails, the journey routes for the walking lanes
+ * boxes, the journey routes for the walking lanes
  * — so a sign can never drift out of step with what it is avoiding.
  *
  * verify-legibility.ts re-checks every one of these constraints independently.
@@ -88,15 +89,6 @@ export interface RideSign {
   /** Smallest distance to anything the sign had to avoid. */
   clearance: number;
 }
-
-const trackPoints: [number, number][] = (() => {
-  const pts: [number, number][] = [];
-  for (let i = 0; i <= 600; i++) {
-    const p = TRACK_CURVE.getPointAt(i / 600);
-    pts.push([p.x * TRAIN_SCALE, p.z * TRAIN_SCALE]);
-  }
-  return pts;
-})();
 
 /**
  * Every stretch of ground an employee actually walks along once inside the
@@ -164,10 +156,8 @@ export function clearanceAt(x: number, z: number): number {
    */
   m = Math.min(m, Math.hypot(x - CHAIRS_CENTER[0], z - CHAIRS_CENTER[1]) - CHAIRS_REACH);
 
-  for (const [px, pz] of trackPoints) {
-    m = Math.min(m, Math.hypot(x - px, z - pz));
-    if (m < MIN_SIGN_CLEARANCE) return m;
-  }
+  /* The railway used to be measured here. It has been removed from the park,
+     so there is nothing left to keep a board clear of. */
 
   m = Math.min(m, Math.abs(Math.hypot(x - PLAZA_CENTER[0], z - PLAZA_CENTER[1]) - PLAZA_RADIUS));
 
@@ -194,76 +184,60 @@ export function hidesAnotherRide(x: number, z: number, ownId: string): boolean {
   );
 }
 
+/**
+ * WHERE A BOARD GOES — beside the ride's own entrance, on the ride's own plot.
+ *
+ * THE SEARCH IS GONE, and it is worth saying why rather than leaving a hole.
+ * It used to sweep a window beside the ride for the nearest spot that cleared
+ * every walking lane and every neighbour AND did not cover another ride seen
+ * from the main gate. That last condition was the expensive one, and on a
+ * radially symmetric park it can never be met: the ten attractions ring the
+ * middle, so from the gate almost every bearing has a ride somewhere along it,
+ * and the search rejected the whole park. It threw rather than choosing badly,
+ * which was the right behaviour and the signal to change the rule.
+ *
+ * The plan answers the question the search was asking. Every ride is entered
+ * at one place — the gateway where its radial path meets its platform — and
+ * that is where a board belongs: you read it as you walk in, at the moment you
+ * need to know which ride this is. So the position is CONSTRUCTED, one step to
+ * the side of the gateway, and it is identical on all ten plots, which is
+ * exactly the symmetry the rest of the plan is built on.
+ *
+ * The clearance is still MEASURED and still reported, so a board that ended up
+ * somewhere silly would still be visible in the checks.
+ */
+export const SIGN_SIDE_OFFSET = RADIAL_PATH_WIDTH / 2 + SIGN_HALF_WIDTH + 5;
+
+function signOnPlot(rideId: string): { position: [number, number]; facing: number; clearance: number } {
+  const entrance = rideEntrance(rideId as RingRideId);
+  const bearing = (RIDE_SLOT_BEARING[rideId as RingRideId] * Math.PI) / 180;
+  /* Perpendicular to the radial, so the board stands beside the gateway
+     rather than in the middle of the way in. */
+  const px = Math.cos(bearing);
+  const pz = -Math.sin(bearing);
+  const position: [number, number] = [
+    entrance[0] + px * SIGN_SIDE_OFFSET,
+    entrance[1] + pz * SIGN_SIDE_OFFSET,
+  ];
+  return {
+    position,
+    /* Facing back down its own radial path, which is the way you arrive. */
+    facing: Math.atan2(PARK_ORIGIN[0] - position[0], PARK_ORIGIN[1] - position[1]),
+    clearance: clearanceAt(position[0], position[1]),
+  };
+}
+
 function solve(rideId: DepartmentRideId): RideSign {
-  const ride = rideById(rideId);
-  const [cx, cz] = ride.center;
-
-  // The gate-facing axis, and the perpendicular the sign is offset along. The
-  // gate-facing axis itself is where the arriving crowd stands, so the sign
-  // goes to one side of it rather than in front.
-  const ax = GATE_X - cx;
-  const az = GATE_Z - cz;
-  const al = Math.hypot(ax, az) || 1;
-  const ux = ax / al;
-  const uz = az / al;
-  const px = -uz;
-  const pz = ux;
-
-  const reach = Math.max(ride.halfX, ride.halfZ);
-
-  let best: { position: [number, number]; clearance: number; score: number } | null = null;
-
-  /*
-   * THE SEARCH HAD TO WIDEN WHEN THE RIDES DID.
-   *
-   * It used to run to sixty metres out and forty along, which was ample beside
-   * a ride sixty metres wide. Every ride in the park is now built to one common
-   * height, so the Monster Ride's footprint has doubled and the Roller
-   * Coaster's is two hundred and seventy metres across — and at those sizes the
-   * old window fell entirely inside the crowd, the walking lanes and the
-   * neighbouring rides, and the coaster's board had nowhere to stand. The
-   * window is measured from the ride's own reach, so it grows with the ride;
-   * what changed is how far past it the search is allowed to look.
-   */
-  for (const side of [1, -1]) {
-    for (let out = reach + 8; out <= reach + 150; out += 2) {
-      for (let along = -60; along <= 80; along += 5) {
-        const x = cx + px * side * out + ux * along;
-        const z = cz + pz * side * out + uz * along;
-
-        if (hidesAnotherRide(x, z, rideId)) continue;
-        const clearance = clearanceAt(x, z);
-        if (clearance < MIN_SIGN_CLEARANCE) continue;
-
-        /*
-         * Proximity dominates. A sign is only useful if you can tell WHICH
-         * ride it labels, so the search takes the closest offset that is still
-         * comfortably clear rather than the roomiest spot in the park — hence
-         * the cap on how much extra clearance can buy.
-         */
-        const score = Math.min(clearance, 26) * 0.8 - out + along * 0.15;
-        if (!best || score > best.score) best = { position: [x, z], clearance, score };
-      }
-    }
-  }
-
-  if (!best) {
-    throw new Error(
-      `No clear spot for the ${rideId} department sign. Widen the search in rideSigns.ts, ` +
-        `or reduce SIGN_HALF_WIDTH — do not place it by hand.`,
-    );
-  }
-
+  const { position, facing, clearance } = signOnPlot(rideId);
   const dept = RIDE_DEPARTMENTS.find((d) => d.rideId === rideId)!;
   return {
     rideId,
     department: dept.department,
     departments: dept.departments,
     rideName: dept.rideName,
-    position: best.position,
-    // Square on to the main gate, so it reads from the arrival view.
-    facing: Math.atan2(GATE_X - best.position[0], GATE_Z - best.position[1]),
-    clearance: best.clearance,
+    position,
+    facing,
+    clearance,
   };
 }
 
@@ -291,112 +265,24 @@ export const RIDE_SIGNS: RideSign[] = RIDE_DEPARTMENTS.map((d) => solve(d.rideId
  * MIN_SIGN_CLEARANCE and is then minimised rather than maximised.
  */
 export interface TeamSign extends Omit<RideSign, "rideId"> {
-  rideId: TrainTeamId | ChairsTeamId | LooperRideId | TeacupsRideId | DumboRideId;
-}
-
-/** The loop's centre in world units — the axis the sign is pushed out along. */
-const TRACK_CENTER_WORLD: [number, number] = [
-  TRACK_CENTER[0] * TRAIN_SCALE,
-  TRACK_CENTER[1] * TRAIN_SCALE,
-];
-
-/**
- * How far off the railway's CENTRE LINE the train's signboard has to stand.
- *
- * `MIN_SIGN_CLEARANCE` is a clearance from the thing itself, and for every
- * other sign in the park the thing is a ride with a footprint. The railway had
- * no footprint here — the board was placed 6 m from the centre line, which put
- * it between the rails even at the old gauge and would have buried it once the
- * track was widened by ten metres. Measuring from the sleeper ends instead
- * gives the same 6 m of clear ground every other sign gets.
- */
-const MIN_RAIL_CLEARANCE = TRACK_HALF_WIDTH_METRES + MIN_SIGN_CLEARANCE;
-
-function trackDistance(x: number, z: number): number {
-  let m = Infinity;
-  for (const [px, pz] of trackPoints) m = Math.min(m, Math.hypot(x - px, z - pz));
-  return m;
+  rideId: ChairsTeamId | LooperRideId | TeacupsRideId | DumboRideId;
 }
 
 /**
- * Clearance to everything EXCEPT the rails.
+ * THE PARK TRAIN'S BOARD IS GONE, with the train.
  *
- * `clearanceAt` above folds the track into the same minimum, which is right
- * for a ride whose sign must stay away from the railway and wrong for the
- * railway's own. The obstacle set is otherwise identical, and it is written
- * out rather than shared so the five existing signs keep their exact solved
- * positions — this function cannot move them.
+ * There was a long section here that placed a signboard for the railway: it
+ * walked the track, pushed out past the rails on the loop's own outward
+ * normal, and took the nearest spot that cleared everything — a board for a
+ * railway wants to be NEXT to the railway, so the track distance was minimised
+ * rather than maximised, which was the opposite of every other sign in the
+ * park and the reason the section existed at all.
+ *
+ * The train, its track and its route have been removed at the user's request,
+ * so the board went with them. The team it carried, DevOps, had no other home
+ * in the park and is not shown anywhere now; giving it to another ride would
+ * be a decision nobody asked for.
  */
-function clearanceIgnoringTrack(x: number, z: number): number {
-  let m = Infinity;
-  for (const r of PARK_LAYOUT) m = Math.min(m, boxDistance(x, z, r));
-
-  m = Math.min(m, Math.abs(Math.hypot(x - PLAZA_CENTER[0], z - PLAZA_CENTER[1]) - PLAZA_RADIUS));
-
-  const fcx = Math.max(Math.abs(x - FOOD_COURT_CENTER[0]) - FOOD_COURT_HALF, 0);
-  const fcz = Math.max(Math.abs(z - FOOD_COURT_CENTER[1]) - FOOD_COURT_HALF, 0);
-  m = Math.min(m, Math.hypot(fcx, fcz));
-  const gx = Math.max(Math.abs(x - GATE_X) - GATE_OPENING, 0);
-  const gz = Math.max(Math.abs(z - GATE_Z) - 40, 0);
-  m = Math.min(m, Math.hypot(gx, gz));
-
-  for (const seg of WALK_SEGMENTS) {
-    m = Math.min(m, segmentDistance(x, z, seg));
-    if (m < MIN_SIGN_CLEARANCE) return m;
-  }
-  return m;
-}
-
-function solveTrainSign(): TeamSign {
-  let best: { position: [number, number]; clearance: number; score: number } | null = null;
-
-  for (const [px, pz] of trackPoints) {
-    const nx = px - TRACK_CENTER_WORLD[0];
-    const nz = pz - TRACK_CENTER_WORLD[1];
-    const nl = Math.hypot(nx, nz) || 1;
-
-    for (let out = MIN_RAIL_CLEARANCE; out <= MIN_RAIL_CLEARANCE + 40; out += 1) {
-      const x = px + (nx / nl) * out;
-      const z = pz + (nz / nl) * out;
-
-      if (hidesAnotherRide(x, z, TRAIN_TEAM_ID)) continue;
-
-      const rails = trackDistance(x, z);
-      if (rails < MIN_RAIL_CLEARANCE) continue;
-      const clearance = Math.min(clearanceIgnoringTrack(x, z), rails);
-      if (clearance < MIN_SIGN_CLEARANCE) continue;
-
-      /*
-       * Same shape as the ride signs' score — proximity dominates, extra
-       * clearance stops paying past 26 m — with `rails` standing in for the
-       * sideways offset, plus a mild pull towards the gate so the board is on
-       * a stretch of railway an arriving visitor is actually looking at.
-       */
-      const gate = Math.hypot(x - GATE_X, z - GATE_Z);
-      const score = Math.min(clearance, 26) * 0.8 - rails - gate * 0.06;
-      if (!best || score > best.score) best = { position: [x, z], clearance, score };
-    }
-  }
-
-  if (!best) {
-    throw new Error(
-      "No clear spot beside the railway for the Park Train's team sign. Widen the outward " +
-        "sweep in rideSigns.ts, or reduce SIGN_HALF_WIDTH — do not place it by hand.",
-    );
-  }
-
-  return {
-    rideId: TRAIN_TEAM_ID,
-    department: TRAIN_TEAM_NAME,
-    departments: [TRAIN_TEAM_NAME],
-    rideName: TRAIN_RIDE_NAME,
-    position: best.position,
-    facing: Math.atan2(GATE_X - best.position[0], GATE_Z - best.position[1]),
-    clearance: best.clearance,
-  };
-}
-
-export const TRAIN_SIGN: TeamSign = solveTrainSign();
 
 /* ------------------------------------------------------------------ *
  * THE FLYING CHAIRS' TEAM SIGN
@@ -419,70 +305,27 @@ export const TRAIN_SIGN: TeamSign = solveTrainSign();
  * `clearanceAt` measures against the park layout, which does not contain the
  * Flying Chairs, so without it a board could be placed underneath the chairs.
  */
+/**
+ * The Flying Chairs' team board, by exactly the same rule as the department
+ * ones: beside its own gateway, on its own plot. It used to run a ring search
+ * outward from the ride, and it fell to the same thing — on a full ring there
+ * is no bearing from the gate that covers nothing.
+ */
 function solveChairsSign(): TeamSign {
-  const [cx, cz] = CHAIRS_CENTER;
-
-  const ax = GATE_X - cx;
-  const az = GATE_Z - cz;
-  const al = Math.hypot(ax, az) || 1;
-  const ux = ax / al;
-  const uz = az / al;
-  const px = -uz;
-  const pz = ux;
-
-  let best: { position: [number, number]; clearance: number; score: number } | null = null;
-
-  /*
-   * A RING SEARCH, for the same reason the other team boards use one: the
-   * rectangle beside the ride ran out of park. Every ride is built to one
-   * common height now, this one's swept circle is half as wide again, and it
-   * stands three hundred metres behind a food court that has itself been left
-   * behind by the enlarged fan — there is no ground in that old window that
-   * clears the neighbours and the walking lanes at once.
-   *
-   * The preference is unchanged: nearest wins, and among equals a board beside
-   * the ride beats one dead in front of the arriving crowd.
-   */
-  for (let out = CHAIRS_REACH + 8; out <= CHAIRS_REACH + 400; out += 3) {
-    for (let step = 0; step < 72; step += 1) {
-      const bearing = (step * Math.PI * 2) / 72;
-      const x = cx + Math.cos(bearing) * out;
-      const z = cz + Math.sin(bearing) * out;
-
-      if (hidesAnotherRide(x, z, CHAIRS_TEAM_ID)) continue;
-
-      /* Its own ride is an obstacle too — a sign stands beside a ride, not
-         under it — and the park layout knows nothing about this one. */
-      const ownRide = Math.hypot(x - cx, z - cz) - CHAIRS_REACH;
-      const clearance = Math.min(clearanceAt(x, z), ownRide);
-      if (clearance < MIN_SIGN_CLEARANCE) continue;
-
-      const sideways = Math.abs(Math.cos(bearing) * px + Math.sin(bearing) * pz);
-      const score = Math.min(clearance, 26) * 0.8 - out + sideways * 20;
-      if (!best || score > best.score) best = { position: [x, z], clearance, score };
-    }
-    if (best) break;
-  }
-
-  if (!best) {
-    throw new Error(
-      "No clear spot for the Flying Chairs' team sign. Widen the search in rideSigns.ts, " +
-        "or reduce SIGN_HALF_WIDTH — do not place it by hand.",
-    );
-  }
-
+  const { position, facing, clearance } = signOnPlot(CHAIRS_TEAM_ID);
   return {
     rideId: CHAIRS_TEAM_ID,
     department: CHAIRS_TEAM_NAME,
     departments: [CHAIRS_TEAM_NAME],
     rideName: CHAIRS_RIDE_NAME,
-    position: best.position,
-    facing: Math.atan2(GATE_X - best.position[0], GATE_Z - best.position[1]),
-    clearance: best.clearance,
+    position,
+    facing,
+    clearance,
   };
 }
 
 export const CHAIRS_SIGN: TeamSign = solveChairsSign();
 
+
 /** Every team board that is not one of the five department signs. */
-export const TEAM_SIGNS: TeamSign[] = [TRAIN_SIGN, CHAIRS_SIGN];
+export const TEAM_SIGNS: TeamSign[] = [CHAIRS_SIGN];

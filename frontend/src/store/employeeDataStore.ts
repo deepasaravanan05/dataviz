@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import { DEPARTMENTS, resolveDepartmentRides } from "@/components/park/departments";
-import { EMPLOYEE_DATASET, type DatasetRow } from "@/simulation/journey/dataset";
-import { BUILTIN_JOURNEY, buildJourney } from "@/simulation/journey/journey";
+import {
+  ATTENDANCE_DATES,
+  DAY_OF_DATE,
+  DEFAULT_DATE,
+  rowsForDate,
+  type DatasetRow,
+} from "@/simulation/journey/dataset";
+import { BUILTIN_JOURNEY, buildJourney, type JourneyData } from "@/simulation/journey/journey";
 import { activateJourney } from "@/simulation/journey/activeJourney";
 import {
   EmployeeUploadError,
@@ -31,8 +37,29 @@ import { repairRoster } from "@/simulation/journey/rosterRepair";
  */
 export type UploadStatus = "idle" | "loading" | "ready" | "error";
 
+/**
+ * WHICH DATE THE PARK IS ANIMATING, and the build for it.
+ *
+ * The workbook holds 49 working days and the park shows one of them at a time,
+ * because a date is what a working morning is. `buildJourney` is pure, so a
+ * date change is simply another build pushed through the same `activateJourney`
+ * an upload uses — and builds are remembered, so going back to a date already
+ * watched is instant.
+ */
+const BUILDS = new Map<string, JourneyData>([[DEFAULT_DATE, BUILTIN_JOURNEY]]);
+
+function journeyForDate(date: string): JourneyData {
+  const cached = BUILDS.get(date);
+  if (cached) return cached;
+  const built = buildJourney(rowsForDate(date));
+  BUILDS.set(date, built);
+  return built;
+}
+
 interface EmployeeDataState {
   status: UploadStatus;
+  /** The Date (IST) the park is animating, "YYYY-MM-DD". */
+  date: string;
   /** The uploaded file's name, shown next to the control once it is read. */
   fileName: string | null;
   /** Parsed rows, or null while the built-in dataset is in use. */
@@ -49,9 +76,15 @@ interface EmployeeDataState {
   notes: string[];
 
   upload: (file: File) => Promise<void>;
-  /** Drop the upload and go back to the built-in dataset. */
+  /** Show another date out of the workbook. Drops any upload. */
+  selectDate: (date: string) => void;
+  /** Drop the upload and go back to the workbook's own records. */
   reset: () => void;
 }
+
+/** Every date the workbook records, and the weekday it fell on. */
+export const SIMULATION_DATES = ATTENDANCE_DATES;
+export const SIMULATION_DAY_OF_DATE = DAY_OF_DATE;
 
 /** Everything an upload result carries, back to nothing. A function, so each
  *  reset gets its own array rather than sharing one across resets. */
@@ -59,9 +92,21 @@ function cleared(): Pick<EmployeeDataState, "fileName" | "rows" | "error" | "not
   return { fileName: null, rows: null, error: null, notes: [] };
 }
 
-export const useEmployeeDataStore = create<EmployeeDataState>((set) => ({
+export const useEmployeeDataStore = create<EmployeeDataState>((set, get) => ({
   status: "idle",
+  date: DEFAULT_DATE,
   ...cleared(),
+
+  selectDate: (date) => {
+    if (!ATTENDANCE_DATES.includes(date) || get().date === date) return;
+    /*
+     * The same swap path as an upload — build, then activate — so the walking
+     * figures, the timeline range, the HUD counts and the ride signs all change
+     * together and none of them can disagree about who is in the park.
+     */
+    activateJourney(journeyForDate(date), "builtin");
+    set({ status: "idle", date, ...cleared() });
+  },
 
   upload: async (file) => {
     set({ status: "loading", ...cleared(), fileName: file.name });
@@ -101,8 +146,9 @@ export const useEmployeeDataStore = create<EmployeeDataState>((set) => ({
 
   reset: () => {
     set({ status: "idle", ...cleared() });
-    // Back to the built-in roster: same swap path as an upload, no rebuild.
-    activateJourney(BUILTIN_JOURNEY, "builtin");
+    // Back to the workbook's own records for whichever date is selected: the
+    // same swap path as an upload, and no rebuild if that date has been shown.
+    activateJourney(journeyForDate(get().date), "builtin");
   },
 }));
 
@@ -112,7 +158,8 @@ export const useEmployeeDataStore = create<EmployeeDataState>((set) => ({
  * instead of importing `EMPLOYEE_DATASET` directly, when the swap is wired.
  */
 export function activeDataset(): DatasetRow[] {
-  return useEmployeeDataStore.getState().rows ?? EMPLOYEE_DATASET;
+  const state = useEmployeeDataStore.getState();
+  return state.rows ?? rowsForDate(state.date);
 }
 
 /**

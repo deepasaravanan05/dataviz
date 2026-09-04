@@ -64,12 +64,6 @@ export default function RollerCoasterPage() {
           Dragon Ride
         </Link>
         <Link
-          href="/park-train"
-          className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
-        >
-          Park Train
-        </Link>
-        <Link
           href="/monster-ride"
           className="rounded-full bg-[#070b14]/82 px-4 py-2 text-sm text-white shadow-lg backdrop-blur transition hover:bg-[#070b14]/90"
         >

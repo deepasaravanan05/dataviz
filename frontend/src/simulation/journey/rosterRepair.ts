@@ -79,7 +79,7 @@ function shift(row: DatasetRow, by: number): DatasetRow {
     ...row,
     checkIn: row.checkIn + by,
     workStart: row.workStart + by,
-    checkOut: row.checkOut + by,
+    checkOut: row.checkOut === null ? null : row.checkOut + by,
   };
 }
 
@@ -234,8 +234,8 @@ export function repairRoster(rows: DatasetRow[]): RepairedRoster {
     }
     if (delayMinutes !== row.delayMinutes || workStart !== row.workStart) repairs.recomputedDelays++;
 
-    let checkOut = minute(row.checkOut);
-    if (checkOut <= workStart) {
+    let checkOut = row.checkOut === null ? null : minute(row.checkOut);
+    if (checkOut !== null && checkOut <= workStart) {
       checkOut = workStart + DEFAULT_WORKDAY_MINUTES;
       repairs.fixedCheckOuts++;
     }
@@ -246,15 +246,20 @@ export function repairRoster(rows: DatasetRow[]): RepairedRoster {
   repaired = sortByArrival(repaired);
 
   /*
-   * ---- The park's real seating is a hard ceiling ----
+   * ---- The food court's chairs are the hard ceiling ----
    *
-   * Not the seats the rides have, nor even the seats a stopped ride presents,
-   * but the seats its BOARDING DECK reaches: nobody ever gets off in this
-   * park, so a ride's whole day is one deckful. `parkIntake()` is the same
-   * number `buildRideSchedule` hands out, so a roster that passes here cannot
-   * fail there.
+   * It used to be the rides: nobody ever got off one, so a ride's whole day was
+   * a single deckful and the park could admit fifty people in total. Riders get
+   * off now — which is what lets a real day's attendance of ninety-six through
+   * five rides that seat fifty at once — so the rides no longer bound a roster
+   * at all.
+   *
+   * What can still run out is a chair. A delayed employee needs one for the
+   * whole of their delay, and a roster no larger than the court's seating can
+   * never exhaust it however the delays fall. `parkIntake()` is reported
+   * alongside so the note can say what the park actually holds.
    */
-  const capacity = parkIntake();
+  const capacity = FOOD_COURT_CHAIRS.length;
   if (repaired.length > capacity) {
     repairs.dropped = repaired.length - capacity;
     repaired = repaired.slice(0, capacity);
@@ -287,7 +292,10 @@ export function repairRoster(rows: DatasetRow[]): RepairedRoster {
     notes.push(`${repairs.shiftedArrivals} arrival${repairs.shiftedArrivals > 1 ? "s" : ""} spaced out at the gate`);
   }
   if (repairs.dropped) {
-    notes.push(`Showing the first ${repaired.length} — the park seats ${capacity}`);
+    notes.push(
+      `Showing the first ${repaired.length} — the food court seats ${capacity}, ` +
+        `and the rides ${parkIntake()} at a time`,
+    );
   }
 
   return { rows: repaired, repairs, notes };

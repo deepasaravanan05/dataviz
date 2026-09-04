@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CalendarCard } from "@/components/dashboard/CalendarCard";
 import { DepartmentOverview } from "@/components/dashboard/DepartmentOverview";
 import { useJourneyStore } from "@/store/journeyStore";
+import { SIMULATION_DATES, useEmployeeDataStore } from "@/store/employeeDataStore";
 
 /**
  * The dashboard, embedded in the Main Entrance rather than opened as a page.
@@ -30,9 +31,15 @@ import { useJourneyStore } from "@/store/journeyStore";
  * second driver would run the morning at double speed.
  */
 
-/** The concept art opens on July 2026, so the entrance calendar does too. */
-const OPENING_YEAR = 2026;
-const OPENING_MONTH = 6; // July, 0-based
+/**
+ * The calendar opens on the month the dataset starts in — July 2026, which is
+ * also the month the concept art opens on. Derived from the workbook rather
+ * than typed, so a different attendance file opens on its own first month.
+ */
+const [OPENING_YEAR, OPENING_MONTH] = (() => {
+  const [y, m] = SIMULATION_DATES[0].split("-").map(Number);
+  return [y, m - 1] as const;
+})();
 
 function CalendarIcon({ className }: { className?: string }) {
   return (
@@ -135,6 +142,8 @@ function PanelToggle({
 
 export function EntranceDashboard() {
   const simTime = useJourneyStore((s) => s.simTime);
+  const date = useEmployeeDataStore((s) => s.date);
+  const selectDate = useEmployeeDataStore((s) => s.selectDate);
 
   /* Independent state per panel — never a single "which one is open". */
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -163,6 +172,15 @@ export function EntranceDashboard() {
               showAdjacentDays
               initialYear={OPENING_YEAR}
               initialMonth={OPENING_MONTH}
+              /*
+               * THE CALENDAR IS THE DATE PICKER. The workbook's Date (IST)
+               * column decides which morning the park animates, and this is
+               * where it is chosen: the dates it actually holds are ringed and
+               * clickable, and the one on screen wears the amber pill.
+               */
+              selectableDates={SIMULATION_DATES}
+              selectedDate={date}
+              onSelectDate={selectDate}
             />
           </div>
         )}

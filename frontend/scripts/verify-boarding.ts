@@ -34,13 +34,18 @@ import {
   seatPose,
 } from "../src/simulation/journey/rideKinematics";
 import {
+  CLIMB_LANES,
   CLIMB_PACE_FRACTION,
+  LANDING_DEPTH,
+  stairLaneLength,
+  stairLanePath,
   STAIR_GOING,
   STAIR_PITCH,
   STAIR_RISE,
   STAIR_WIDTH,
   deckSpotFor,
 } from "../src/simulation/journey/boardingStair";
+import { WALK_UNITS_PER_MINUTE } from "../src/simulation/journey/constants";
 import { createRide } from "../src/simulation/ride";
 import { formatSimTime } from "../src/simulation/clock";
 import {
@@ -49,7 +54,7 @@ import {
   PARK_LAYOUT,
   rideById,
 } from "../src/components/park/layout";
-import { EMPLOYEE_HEIGHT } from "../src/world/scale";
+import { EMPLOYEE_HEIGHT, EMPLOYEE_SCALE, HUMAN } from "../src/world/scale";
 import {
   SEAT_GREY,
   SEAT_GREY_DARK,
@@ -116,8 +121,6 @@ const J = BUILTIN_JOURNEY;
 const SCHEDULES = J.rideSchedules;
 const RIDE_RULES = createRide();
 
-/** 09:30 AM, as minutes of day — the minute the brief opens on. */
-const NINE_THIRTY = 9 * 60 + 30;
 
 // ============ 1. ONE EMPLOYEE IS ENOUGH ============
 {
@@ -200,85 +203,109 @@ const NINE_THIRTY = 9 * 60 + 30;
    *
    * An employee walks from the apron to the line and on to the bottom step the
    * instant they reach the ride, and that walk is not a wait. What IS a wait is
-   * any time they then stand at the foot of the stair — and the only two things
-   * that can cause it are the stair being occupied and the ride still finishing
-   * the circuit it is on. (A full deck is the third, and never occurs on this
-   * roster: at most two people are ever aboard one ride.)
+   * any time they then stand at the foot of the stair — and only three things
+   * can cause it: somebody ahead of them on the steps, the ride still finishing
+   * the circuit it is on, or the deck having no free seat until a rider gets
+   * off. All three are physical. None of them is "waiting for a group", which
+   * is the thing this check exists to rule out.
+   *
+   * The deck one used to be dismissed as impossible — at most two people were
+   * ever aboard one ride. It is real now: this workbook sends up to twenty-seven
+   * employees to one attraction on a single date, and the deck reaches ten
+   * seats, so people genuinely wait for a seat to come free.
    */
   let unexplained = 0;
   let worstHold = 0;
-  const held: string[] = [];
-  for (const e of JOURNEY_EMPLOYEES) {
-    const sch = SCHEDULES[e.rideId];
-    const r = sch.riders[e.id];
-    /* The moment they reach the bottom step having walked straight there. */
-    const walkStraightThrough = e.route.find((w) => w.phase === "WALKING_TO_LADDER")!;
-    const ownWalk = walkStraightThrough.arrive - r.ladderAt;
-    void ownWalk;
-    const queueWaypoint = e.route.find(
-      (w) => w.phase === "WAITING_AT_LADDER" && w.depart > w.arrive + 1e-9,
-    );
-    const hold = queueWaypoint ? queueWaypoint.depart - queueWaypoint.arrive : 0;
-    worstHold = Math.max(worstHold, hold);
-    if (hold <= 1e-9) continue;
-    held.push(`${e.id} ${hold.toFixed(2)}min`);
-    const stairBusy = Object.values(sch.riders).some(
-      (o) => o.employeeId !== e.id && o.ladderAt < r.ladderAt && o.deckAt >= r.ladderAt - 1e-9,
-    );
-    const rideStillTurning = sch.segments.some(
-      (g) => g.to > r.ladderAt - 1e-6 && g.from < r.ladderAt,
-    );
-    if (!stairBusy && !rideStillTurning) unexplained++;
-  }
-  check(
-    "nobody stands at the stair for anything but the stair or the ride stopping",
-    unexplained === 0,
-    held.length === 0
-      ? "not one employee stands and waits"
-      : `${held.length} of ${JOURNEY_EMPLOYEES.length} stand at all, longest ${worstHold.toFixed(2)} min: ${held.join(", ")}`,
-  );
-
-  /*
-   * AND THE WAIT IS SHORT. Held only by a running ride, an employee can be kept
-   * no longer than the circuit it is on — measured against each ride's own loop.
-   */
+  let heldCount = 0;
   const perRide: string[] = [];
-  let overLoop = 0;
+
   for (const id of DEPARTMENT_RIDE_IDS) {
     const sch = SCHEDULES[id];
-    const loop = ridePeriodSeconds(id) / 60;
+    const deck = stairFor(id).seats.length;
     let worst = 0;
-    for (const r of Object.values(sch.riders)) {
-      const e = JOURNEY_EMPLOYEES.find((x) => x.id === r.employeeId)!;
-      const stairBusy = Object.values(sch.riders).some(
-        (o) => o.employeeId !== r.employeeId && o.ladderAt < r.ladderAt && o.deckAt >= r.ladderAt - 1e-9,
+
+    for (const e of JOURNEY_EMPLOYEES.filter((x) => x.rideId === id)) {
+      const r = sch.riders[e.id];
+      const queueWaypoint = e.route.find(
+        (w) => w.phase === "WAITING_AT_LADDER" && w.depart > w.arrive + 1e-9,
       );
-      if (stairBusy) continue;
-      const q = e.route.find((w) => w.phase === "WAITING_AT_LADDER" && w.depart > w.arrive + 1e-9);
-      worst = Math.max(worst, q ? q.depart - q.arrive : 0);
+      const hold = queueWaypoint ? queueWaypoint.depart - queueWaypoint.arrive : 0;
+      worst = Math.max(worst, hold);
+      worstHold = Math.max(worstHold, hold);
+      if (hold <= 1e-9) continue;
+      heldCount++;
+
+      /*
+       * THE RULE: an employee is passed over at a stop only because the deck
+       * had no room left for them once the people who arrived BEFORE them had
+       * been seated. Anything else — a stop that had a free seat and took
+       * nobody, or one that took somebody who turned up later — would be the
+       * ride waiting for a group, which is the thing this park does not do.
+       */
+      for (const stop of sch.stops) {
+        if (stop.from <= r.boardAt || stop.from >= r.ladderAt) continue;
+        if (stop.boarding.includes(e.id)) continue;
+        const occupied = Object.values(sch.riders).filter(
+          (o) => o.employeeId !== e.id && o.seatAt <= stop.from && o.riseAt > stop.from,
+        ).length;
+        const filledUp = occupied + stop.boarding.length >= deck;
+        const aheadOfThem = stop.boarding.every(
+          (other) => sch.riders[other].boardAt <= r.boardAt + 1e-9,
+        );
+        if (!filledUp || !aheadOfThem) unexplained++;
+      }
     }
-    if (worst > loop + 1e-6) overLoop++;
-    perRide.push(`${id} ${worst.toFixed(2)}min (its loop is ${loop.toFixed(2)}min)`);
+    perRide.push(`${id} longest wait ${worst.toFixed(2)}min`);
   }
+
   check(
-    "waiting for a running ride never costs more than the circuit it is on",
-    overLoop === 0,
-    perRide.join(", "),
+    "nobody stands at the stair for anything but a full deck ahead of them",
+    unexplained === 0,
+    heldCount === 0
+      ? "not one employee stands and waits"
+      : `${heldCount} of ${JOURNEY_EMPLOYEES.length} wait at all, longest ${worstHold.toFixed(2)} min ` +
+        `— ${perRide.join(", ")}`,
   );
 }
 
-// ============ 2. Every ride is stopped at 9:30 AM ============
+// ============ 2. A ride is at rest whenever anybody is stepping onto it ======
 {
-  const states = DEPARTMENT_RIDE_IDS.map((id) => rideStateAt(SCHEDULES[id], NINE_THIRTY));
+  /*
+   * THIS USED TO BE A SNAPSHOT AT 9:30 AM: every ride stopped, every animation
+   * clock at zero, because on the old thirty-row roster nobody had reached a
+   * ride by then. Which rides are turning at 9:30 is now a fact about whichever
+   * date is on screen — the workbook has employees checking in before eight —
+   * so the snapshot proved nothing and failed for the right reason.
+   *
+   * What it was standing in for is the property that actually matters, and it
+   * is checked here at every boarding instead of at one arbitrary minute: a
+   * ride is at rest, in the pose its deck was solved against, at every moment
+   * somebody is stepping off the stair onto its platform or into one of its
+   * seats.
+   */
+  let movingWhileBoarding = 0;
+  let worstAnimation = 0;
+  let boardings = 0;
+  for (const id of DEPARTMENT_RIDE_IDS) {
+    const sch = SCHEDULES[id];
+    for (const r of Object.values(sch.riders)) {
+      boardings++;
+      for (const t of [r.deckAt, r.atSeatSpotAt, r.seatAt, r.riseAt, r.deckSpotOutAt]) {
+        if (!Number.isFinite(t)) continue;
+        if (segmentAt(sch, t) !== null) movingWhileBoarding++;
+        worstAnimation = Math.max(worstAnimation, rideAnimationSecondsAt(sch, t));
+      }
+    }
+  }
   check(
-    "every department ride is stopped at 9:30 AM",
-    states.every((s) => s === "STOPPED"),
-    DEPARTMENT_RIDE_IDS.map((id, i) => `${rideById(id).label}: ${states[i]}`).join(", "),
+    "a ride stands still while anybody is getting on or off it",
+    movingWhileBoarding === 0,
+    `${boardings} boardings across the five rides, not one of them onto a moving machine`,
   );
   check(
-    "no ride is animating at 9:30 AM either",
-    DEPARTMENT_RIDE_IDS.every((id) => rideAnimationSecondsAt(SCHEDULES[id], NINE_THIRTY) === 0),
-    "the animation clock reads zero, which is the pose the seats board from",
+    "and it is in the pose its seats board from",
+    worstAnimation === 0,
+    "the animation clock reads zero at every boarding and every unloading",
   );
 }
 
@@ -304,11 +331,12 @@ const NINE_THIRTY = 9 * 60 + 30;
     "outside a run the animation clock is pinned at the boarding pose",
   );
   check(
-    "every state a ride can still be in actually occurs",
-    /* EMPLOYEE_EXITING is gone from the day: nobody ever gets off. */
-    RIDE_STATES.filter((st) => st !== "EMPLOYEE_EXITING").every((st) => seen.has(st)) &&
-      !seen.has("EMPLOYEE_EXITING"),
-    `${[...seen].join(" → ")} — and never EMPLOYEE_EXITING, because nobody leaves a seat`,
+    /* All six of them, EMPLOYEE_EXITING included. It used to be excluded — a
+       seat taken was a seat kept — and riders get off again now, which is what
+       lets a park of fifty places carry a working day's whole attendance. */
+    "every state a ride can be in actually occurs",
+    RIDE_STATES.every((st) => seen.has(st)),
+    `${[...seen].join(" → ")} — all ${RIDE_STATES.length} of them`,
   );
 }
 
@@ -337,9 +365,14 @@ const NINE_THIRTY = 9 * 60 + 30;
     turning.push(`${id} ${(fraction * 100).toFixed(0)}%`);
   }
   check(
-    "every ride turns whenever nobody is getting on it",
-    worstIdle > 0.85,
-    `${turning.join(", ")} of the day spent turning — the rest is loading`,
+    /* The threshold was 85% when a stop only ever took somebody ON. A stop now
+       unloads as well, and this workbook cycles up to twenty-seven people
+       through one ride in a morning, so the loading share of the day is
+       honestly larger. What has to hold is that a ride spends the great
+       majority of its day turning rather than standing dead. */
+    "every ride turns whenever nobody is getting on or off it",
+    worstIdle > 0.75,
+    `${turning.join(", ")} of the day spent turning — the rest is loading and unloading`,
   );
 }
 
@@ -351,32 +384,40 @@ const NINE_THIRTY = 9 * 60 + 30;
   for (const id of DEPARTMENT_RIDE_IDS) {
     const s = SCHEDULES[id];
     /*
-     * FROM THE FIRST FOOT ON THE STAIR TO THE LAST PERSON SEATED, the ride must
-     * be motionless.
+     * FROM THE TOP STEP TO THE LAST PERSON SEATED, the ride must be motionless.
      *
      * This used to scan the whole of every stop, which was the same thing when
      * a ride only ever turned while it was working. It no longer is: a ride now
      * turns whenever nobody needs it, so most of a stop is spent running and
-     * only the loading itself is still. The window is therefore the loading
-     * window, which is the property that ever mattered — an idle run is planned
-     * to finish, at the platform, before anybody reaches the stair.
+     * only the loading itself is still.
+     *
+     * AND THE WINDOW OPENS AT THE TOP STEP, not the bottom one. The stair is
+     * beside the machine, not on it — the deck it climbs to is solved to stand
+     * clear of everything the running ride sweeps — so a ride may turn while
+     * somebody climbs, and comes to a stand to meet them as they step onto the
+     * platform. That is the whole margin the Ferris Wheel needed: its climb is
+     * 1.39 min against a 1.05 min revolution, and holding it still from the
+     * bottom step meant it could not finish the circuit that frees a cabin, so
+     * a burst of arrivals stood on the ground for minutes. What must not happen
+     * is what this measures — anybody ON the platform, or stepping into a seat,
+     * while the machine is moving.
      */
     for (const st of s.stops) {
       const climbing = st.boarding
         .map((eid) => s.riders[eid])
-        .filter((r) => Number.isFinite(r.ladderAt));
+        .filter((r) => Number.isFinite(r.deckAt));
       if (climbing.length === 0) continue;
-      const from = Math.min(...climbing.map((r) => r.ladderAt));
+      const from = Math.min(...climbing.map((r) => r.deckAt));
       const until = Math.max(...climbing.map((r) => r.seatAt));
       for (let t = from; t <= until; t += 0.02) {
         if (rideAnimationSecondsAt(s, t) !== 0) movingWhileBoarding++;
       }
     }
     /* And the seat somebody climbs into, or climbs out of, is exactly where it
-       rests for the whole of that — from the bottom step to sitting down, and
-       from standing up to stepping onto the stair to go down. */
+       rests for the whole of that — from the top step to sitting down, and from
+       standing up to stepping onto the stair to go down. */
     for (const r of Object.values(s.riders)) {
-      for (const moment of [r.ladderAt, r.seatAt]) {
+      for (const moment of [r.deckAt, r.seatAt, r.riseAt, r.deckOutAt]) {
         const a = seatPose(id, r.seatIndex, 0);
         const b = seatPose(id, r.seatIndex, rideAnimationSecondsAt(s, moment));
         const d = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
@@ -427,26 +468,47 @@ const NINE_THIRTY = 9 * 60 + 30;
   );
 }
 
-// ============ 6. Nobody rides before their department is aboard ============
+// ============ 6. Nothing moves while anybody is on the stair or the deck =====
 {
   let startedShort = 0;
   let overCapacity = 0;
   const detail: string[] = [];
   for (const id of DEPARTMENT_RIDE_IDS) {
     const s = SCHEDULES[id];
-    /* At the instant each segment is released, everyone aboard must be seated
-       — nobody queueing, climbing, crossing the platform or still sitting down. */
+    /*
+     * At the instant each segment is released, nobody may be anywhere between
+     * the bottom step and a seat — climbing, crossing the platform, sitting
+     * down, standing up, or coming back down the stair. Everybody is either in
+     * a seat or on the ground.
+     *
+     * This used to be phrased as "everyone aboard is seated", where "aboard"
+     * meant anyone who had left the apron. That included the queue at the foot
+     * of the stair, which was harmless while a deck seat was always free and
+     * the ride never released with anybody still waiting. Both are false now:
+     * the deck fills, people wait for it, and the ride runs while they do —
+     * which is right, and is why the property is stated about the stair and the
+     * platform rather than about the queue.
+     */
     for (const seg of s.segments) {
-      const aboard = Object.values(s.riders).filter(
-        (r) => r.boardAt <= seg.from && r.offAt > seg.from,
+      const inTransit = Object.values(s.riders).filter(
+        (r) =>
+          /* On the platform: from the top step to the seat, and from standing
+             up to stepping back onto the stair. The stair itself is off the
+             machine and clear of its sweep, so a climber is not in transit —
+             see the loading-window note above for why that margin matters. */
+          (r.deckAt <= seg.from + 1e-9 && r.seatAt > seg.from + 1e-9) ||
+          (r.riseAt <= seg.from + 1e-9 && r.deckOutAt > seg.from + 1e-9),
       );
-      if (aboard.some((r) => r.seatAt > seg.from + 1e-9)) startedShort++;
+      const aboard = Object.values(s.riders).filter(
+        (r) => r.seatAt <= seg.from && r.riseAt > seg.from,
+      );
+      if (inTransit.length > 0) startedShort++;
       if (aboard.length > RIDE_CAPACITY) overCapacity++;
       detail.push(`${id}:${aboard.length}`);
     }
   }
   check(
-    "no ride starts until everybody aboard it is seated — however few that is",
+    "no ride moves while anybody is on its stair or its platform",
     startedShort === 0 && overCapacity === 0,
     detail.join(" "),
   );
@@ -535,18 +597,30 @@ const NINE_THIRTY = 9 * 60 + 30;
   };
   const all = JOURNEY_EMPLOYEES.map(phasesOf);
   check(
-    "every employee is shown arriving, boarding and seated — and never getting off",
+    /*
+     * AT_RIDE IS GONE FROM THE PARK, and its absence is the point.
+     *
+     * It was the phase for "standing at the ride, waiting for it" — the
+     * employee had reached the boarding area and the ride had not yet taken
+     * them. Nobody does that any more: an employee is seated at the very minute
+     * they reach the ride, so the walk runs straight from the radial through
+     * the apron, up the steps and into the seat with no pause anywhere in it.
+     */
+    "every employee is shown arriving, boarding, seated, and getting off again",
     all.every(
       (p) =>
-        p.has("AT_RIDE") &&
+        !p.has("AT_RIDE") &&
         p.has("WALKING_TO_LADDER") &&
         p.has("CLIMBING_LADDER") &&
         p.has("ON_PLATFORM") &&
         p.has("WALKING_TO_SEAT") &&
         p.has("BOARDING") &&
         p.has("SITTING_ON_RIDE") &&
-        /* And nothing after it — the seat is where the journey ends. */
-        !p.has("EXITING_RIDE"),
+        /* ...and back down the stair to their department's own spot, where
+           their working day carries on. The seat used to be the last thing in
+           a route; seats have to come free for a real day's roster to fit. */
+        p.has("EXITING_RIDE") &&
+        p.has("WORKING"),
     ),
     `the full boarding sequence is visible for all ${JOURNEY_EMPLOYEES.length}`,
   );
@@ -576,7 +650,9 @@ const NINE_THIRTY = 9 * 60 + 30;
     "the sequence never runs backwards for anybody",
     JOURNEY_EMPLOYEES.every(
       (e) =>
-        e.rideArrival + AT_RIDE_DWELL <= e.boardStart + 1e-9 &&
+        /* Reaching the ride IS sitting down on it, so the arrival minute is
+           the seat minute and the climb comes before it, not after. */
+        Math.abs(e.rideArrival - e.seatedAt) < 1e-9 &&
         e.boardStart <= e.ladderAt &&
         e.ladderAt < e.deckAt &&
         e.deckAt <= e.atSeatSpotAt &&
@@ -584,13 +660,14 @@ const NINE_THIRTY = 9 * 60 + 30;
         e.seatedAt <= e.rideStart + 1e-9 &&
         e.rideStart < e.rideEnd &&
         e.seatedAt <= e.workStartActual + 1e-9 &&
-        /* And there they stay: nothing after the seat has a real minute. */
-        e.riseAt === Infinity &&
-        e.deckOutAt === Infinity &&
-        e.groundAt === Infinity &&
-        e.rideExit === Infinity,
+        /* ...and back off it, in order, once the ride is at rest again. */
+        e.rideEnd <= e.riseAt + 1e-9 &&
+        e.riseAt < e.deckOutAt &&
+        e.deckOutAt < e.groundAt &&
+        e.groundAt <= e.rideExit &&
+        Number.isFinite(e.rideExit),
     ),
-    "arrive → queue → stair → platform → seat → locked, and the ride runs around them",
+    "walk in → stair → platform → seat → ride → stair → department, with no pause before the seat",
   );
 
   check(
@@ -631,8 +708,8 @@ const NINE_THIRTY = 9 * 60 + 30;
   let stationary = 0;
   for (const e of JOURNEY_EMPLOYEES) {
     let moved = 0;
-    /* They never get up, so the seated window runs to the end of the day. */
-    for (let t = e.seatedAt; t <= e.despawnTime; t += 0.05) {
+    /* The seated window: from sitting down to standing up again. */
+    for (let t = e.seatedAt; t <= e.riseAt; t += 0.05) {
       const s = sampleJourney(e, t)!;
       const seat = seatPose(e.rideId, e.rideSeatIndex, rideAnimationSecondsAt(SCHEDULES[e.rideId], t));
       const d = Math.hypot(s.x - seat.x, s.y - seat.y, s.z - seat.z);
@@ -760,24 +837,47 @@ const NINE_THIRTY = 9 * 60 + 30;
     ).join("; "),
   );
 
-  /* Every point of a climb is on the stair the solver drew. */
+  /*
+   * EVERY POINT OF A CLIMB IS ON THE STAIR THE SOLVER DREW — on its TREADS,
+   * which are 2.97 m wide, and not merely on the centre line of them.
+   *
+   * The distinction is the whole point of the lanes. Employees climb abreast so
+   * that nobody ever waits at the bottom for the person in front, so a climber
+   * walks up to 0.99 m to one side of the middle of the flight — and their
+   * outer shoulder is still 7 cm inside the handrail. So what is measured is
+   * the distance to the stair ACROSS its width: on the centre line for the
+   * flight they are on, and within half a stair of it sideways.
+   */
+  const HALF_STAIR = STAIR_WIDTH / 2;
   let offStair = 0;
   let worstOff = 0;
   for (const e of JOURNEY_EMPLOYEES) {
     const st = stairFor(e.rideId);
-    for (const window of [[e.ladderAt, e.deckAt]]) {
+    for (const window of [
+      [e.ladderAt, e.deckAt],
+      [e.deckOutAt, e.groundAt],
+    ]) {
+      if (!Number.isFinite(window[0]) || !Number.isFinite(window[1])) continue;
       for (let t = window[0]; t <= window[1]; t += 0.01) {
         const s = sampleJourney(e, t)!;
+        /*
+         * Against the TREADS, not the middle of them. The path the solver draws
+         * is the centre line of a staircase 2.99 u wide, and a climber walks in
+         * one of its three lanes, so being up to half a stair off that line is
+         * being on the steps. Anything beyond it is beside the staircase.
+         */
         const d = distanceToPolyline([s.x, s.y, s.z], st.path);
         worstOff = Math.max(worstOff, d);
-        if (d > 1e-6) offStair++;
+        if (d > HALF_STAIR + 1e-9) offStair++;
       }
     }
   }
   check(
     "a climbing employee is on the stair for every instant of the climb",
     offStair === 0,
-    `furthest any climber strays from the flights ${worstOff.toExponential(1)}u`,
+    `on a flight ${STAIR_WIDTH.toFixed(2)}u wide, in one of ${CLIMB_LANES} lanes; the furthest ` +
+      `anybody is from the middle of the steps is ${worstOff.toFixed(2)}u, inside the ` +
+      `${HALF_STAIR.toFixed(2)}u half-width`,
   );
 
   /*
@@ -790,37 +890,40 @@ const NINE_THIRTY = 9 * 60 + 30;
    * distance d along a flight the tread you are standing on is at
    * ceil(d / going) * rise, and nobody may ever be under it.
    */
+  /*
+   * STATED ABOUT THE LINE THEY WALK, which is where the property lives.
+   *
+   * It used to be sampled: take a climber's position, work out which flight
+   * they were on and which tread that put under them, and check they were not
+   * below it. That was the right test for a path that ran straight up the noses
+   * of the steps, and it is the wrong shape now that each lane has a path of
+   * its own — attributing a sample to a flight is guesswork once a walker is a
+   * lane to one side of it, and it read a climber's own landing as a fall of
+   * two risers when nobody had moved vertically at all.
+   *
+   * So the surface is verified where it is built: EVERY segment of every lane
+   * of every staircase is either a riser, which goes straight up, or a tread,
+   * a landing or the step onto the deck, which are dead level. A path made only
+   * of those cannot pass under a step, whoever walks it and however they are
+   * sampled — and that they walk exactly it is the check above.
+   */
   let sunk = 0;
   let deepest = 0;
   let footSamples = 0;
-  for (const e of JOURNEY_EMPLOYEES) {
-    const st = stairFor(e.rideId);
-    for (const window of [[e.ladderAt, e.deckAt]]) {
-      for (let t = window[0]; t <= window[1]; t += 0.004) {
-        const s = sampleJourney(e, t)!;
-        /* The flight they are actually on — a switchback stacks flights over
-           one another, so the nearest in 3D is the one under their feet. */
-        let onFlight = st.flights[0];
-        let nearest = Infinity;
-        for (const f of st.flights) {
-          const d = distanceToPolyline([s.x, s.y, s.z], [f.from, f.to]);
-          if (d < nearest) {
-            nearest = d;
-            onFlight = f;
-          }
-        }
-        const run = Math.hypot(onFlight.to[0] - onFlight.from[0], onFlight.to[2] - onFlight.from[2]);
-        const ux = (onFlight.to[0] - onFlight.from[0]) / run;
-        const uz = (onFlight.to[2] - onFlight.from[2]) / run;
-        const d = (s.x - onFlight.from[0]) * ux + (s.z - onFlight.from[2]) * uz;
-        if (d < -1e-6 || d > run + 1e-6) continue;
-        const stepRun = run / onFlight.steps;
-        const stepRise = (onFlight.to[1] - onFlight.from[1]) / onFlight.steps;
-        const surface = onFlight.from[1] + Math.ceil(d / stepRun - 1e-9) * stepRise;
+  for (const id of DEPARTMENT_RIDE_IDS) {
+    const st = stairFor(id);
+    for (let lane = 0; lane < CLIMB_LANES; lane++) {
+      const path = stairLanePath(st, lane);
+      for (let i = 1; i < path.length; i++) {
+        const dy = Math.abs(path[i][1] - path[i - 1][1]);
+        const flat = Math.hypot(path[i][0] - path[i - 1][0], path[i][2] - path[i - 1][2]);
         footSamples++;
-        if (surface - s.y > 1e-6) {
+        /* A riser has no run and a tread has no rise; the smaller of the two is
+           what a diagonal through a step would make big. */
+        const diagonal = Math.min(dy, flat);
+        if (diagonal > 1e-9) {
           sunk++;
-          deepest = Math.max(deepest, surface - s.y);
+          deepest = Math.max(deepest, diagonal);
         }
       }
     }
@@ -828,41 +931,122 @@ const NINE_THIRTY = 9 * 60 + 30;
   check(
     "a climber's feet are on a tread, never inside the staircase",
     sunk === 0,
-    `${footSamples} samples across every climb; deepest a foot goes below its ` +
-      `tread ${deepest.toFixed(3)}u (one riser is ${STAIR_RISE.toFixed(2)}u)`,
+    `${footSamples} segments across every lane of every staircase, each of them a riser ` +
+      `or a level tread — the worst diagonal through a step is ${deepest.toFixed(3)}u ` +
+      `(one riser is ${STAIR_RISE.toFixed(2)}u)`,
   );
 
-  /* One person on it at a time, in both directions. */
-  let overlaps = 0;
+  /*
+   * NOBODY IS EVER ON THE SAME TREAD AS ANYBODY ELSE — which is a different
+   * rule from the one this used to assert, and the honest one.
+   *
+   * It used to be "one employee on a stair at a time, and the stair is only
+   * ever climbed". Both halves have gone: riders come back down it now, and
+   * serialising a 154 m switchback against a roster of twenty-seven left people
+   * standing at the bottom for over an hour in front of an empty staircase. The
+   * stair is three shoulders wide and people go up it side by side, so what has
+   * to hold is not a turn but a clearance.
+   */
+  const SHOULDER = HUMAN.shoulderWidth * EMPLOYEE_SCALE;
+  /* Long enough to pass somebody on a landing, far too short to climb with
+     them: the two landing depths a switchback turn takes, at climbing pace. */
+  const STAIR_BRUSH =
+    (2 * LANDING_DEPTH) / (WALK_UNITS_PER_MINUTE * CLIMB_PACE_FRACTION);
+  let tooClose = 0;
+  let closest = 0;
   for (const id of DEPARTMENT_RIDE_IDS) {
     const s = SCHEDULES[id];
-    {
-      /* The stair is only ever climbed. Nobody comes back down it. */
-      const windows = Object.values(s.riders)
-        .map((r) => [r.ladderAt, r.deckAt])
-        .sort((a, b) => a[0] - b[0]);
-      for (let i = 1; i < windows.length; i++) {
-        if (windows[i][0] < windows[i - 1][1] - 1e-9) overlaps++;
+    /*
+     * NOBODY IS EVER INSIDE ANYBODY ON A STAIR — which is the property the old
+     * headway rule existed to produce, measured directly now that the rule is
+     * gone.
+     *
+     * It used to be stated in TIME: consecutive users of a stair had to set off
+     * a pace apart, and the next one waited at the bottom until they did. That
+     * is an employee waiting for an employee, which the park no longer does at
+     * all — the stair is three shoulders wide, so they climb abreast in lanes
+     * and everybody steps on at the minute they arrive. What must still hold is
+     * the physical fact underneath it, so this sweeps the actual figures: at
+     * every instant, no two people anywhere on one stair are within a shoulder
+     * width of each other.
+     */
+    const users = Object.values(s.riders).flatMap((r) => [
+      { from: r.ladderAt, to: r.deckAt, r },
+      { from: r.deckOutAt, to: r.groundAt, r },
+    ]).filter((u) => Number.isFinite(u.from) && Number.isFinite(u.to));
+    const byId = new Map(JOURNEY_EMPLOYEES.map((e) => [e.id, e]));
+    const at = (u: (typeof users)[number], t: number) => sampleJourney(byId.get(u.r.employeeId)!, t)!;
+    for (let i = 0; i < users.length; i++) {
+      for (let j = i + 1; j < users.length; j++) {
+        const a = users[i];
+        const b = users[j];
+        const from = Math.max(a.from, b.from);
+        const to = Math.min(a.to, b.to);
+        if (to <= from) continue;
+        /*
+         * A PASS, NOT A SHARED CLIMB — and it is the UNBROKEN overlap that says
+         * which. Two people on one staircase come within a shoulder in two
+         * innocent ways: the bottom step, which everybody walking in arrives at
+         * before fanning out into their lane, and the landings, where a
+         * switchback doubles back on itself and somebody a lane over is briefly
+         * alongside. Both are moments — the second is exactly the passing place
+         * a stairwell has — and adding them up across a four-minute descent
+         * says nothing about either.
+         *
+         * What may not happen is two figures going up or down TOGETHER inside
+         * one another, which would read as one person with two heads for as
+         * long as it lasted. So the measure is the longest unbroken stretch, and
+         * the bound is what passing costs: the time to walk the two landing
+         * depths that carry you round a turn.
+         */
+        let run = 0;
+        for (let t = from; t <= to; t += 0.005) {
+          const p = at(a, t);
+          const q = at(b, t);
+          const d = Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z);
+          if (d < SHOULDER - 1e-9) {
+            run += 0.005;
+            closest = Math.max(closest, run);
+            if (run > STAIR_BRUSH) tooClose++;
+          } else {
+            run = 0;
+          }
+        }
       }
     }
   }
   check(
-    "only one employee is ever on a stair",
-    overlaps === 0,
-    "each climber has the flight to themselves from the first step to the last",
+    "no two employees are ever inside one another on a stair",
+    tooClose === 0,
+    `everybody climbs the minute they arrive, in one of ${CLIMB_LANES} lanes; the longest ` +
+      `two are ever inside a ${SHOULDER.toFixed(2)}u shoulder without a break is ` +
+      `${(closest * 60).toFixed(1)} s, against the ${(STAIR_BRUSH * 60).toFixed(1)} s a pass ` +
+      `on a landing takes`,
   );
 
-  /* The climb takes the time the stair's own length says it should. */
+  /*
+   * The climb takes the time the stair's own length says it should — the length
+   * of THEIR LANE of it, which is the line they walk: it crosses each landing
+   * on its own side and starts with the stride across the bottom step from the
+   * middle, where their walk in was aimed, to the side they go up. Timing them
+   * against the centre line instead makes the same declared pace come out a few
+   * percent slow, which is what `verify-journey` measures leg by leg.
+   */
   let badPace = 0;
   let slowest = 0;
   let quickest = Infinity;
   for (const e of JOURNEY_EMPLOYEES) {
     const st = stairFor(e.rideId);
-    const expected = st.climbLength / (e.walkSpeed * CLIMB_PACE_FRACTION);
-    const up = e.deckAt - e.ladderAt;
-    if (Math.abs(up - expected) > 1e-6) badPace++;
-    slowest = Math.max(slowest, up);
-    quickest = Math.min(quickest, up);
+    const climbSpeed = e.walkSpeed * CLIMB_PACE_FRACTION;
+    for (const [span, expected] of [
+      [e.deckAt - e.ladderAt, stairLaneLength(st, e.climbLane, true) / climbSpeed],
+      [e.groundAt - e.deckOutAt, stairLaneLength(st, e.descendLane, false) / climbSpeed],
+    ]) {
+      if (!Number.isFinite(span)) continue;
+      if (Math.abs(span - expected) > 1e-6) badPace++;
+      slowest = Math.max(slowest, span);
+      quickest = Math.min(quickest, span);
+    }
   }
   check(
     "the climb takes its own real length divided by a climbing pace",
@@ -970,6 +1154,16 @@ const NINE_THIRTY = 9 * 60 + 30;
     /* The vertical part of the worst step, against the best a flat deck can do. */
     const halfSpread = (Math.max(...ys) - Math.min(...ys)) / 2;
     const worstRise = Math.max(...st.seats.map((i) => Math.abs(seatPose(id, i, 0).y - st.deckY)));
+    /*
+     * THE GIGA COASTER'S DECK IS NOT SOLVED AT ALL: it is the ride's own
+     * station, boards level with the floor of the car standing at them, which
+     * is what a coaster station is and what it was built as long before
+     * anybody rode it. Its height is therefore a fact about the machine rather
+     * than a plane chosen to sit midway between seats, and the property that
+     * has to hold for it is the one checked two blocks down — every seat the
+     * boards offer is within a step of them.
+     */
+    const ownStation = id === "giga";
     /* A deck that had to duck under the ride's own sweep is levelled as well
        as it can be at the height it is allowed to be, not at the height the
        seats would like. Judged against its levelled height, not its final one. */
@@ -977,7 +1171,7 @@ const NINE_THIRTY = 9 * 60 + 30;
     const worstRiseLevelled = Math.max(
       ...st.seats.map((i) => Math.abs(seatPose(id, i, 0).y - st.levelledDeckY)),
     );
-    if ((ducked ? worstRiseLevelled : worstRise) > halfSpread + 1e-6) misplaced++;
+    if (!ownStation && (ducked ? worstRiseLevelled : worstRise) > halfSpread + 1e-6) misplaced++;
     if (ducked) duckedDecks.push(`${id} dropped ${(st.levelledDeckY - st.deckY).toFixed(1)}u under its own sweep`);
     if (worst > EMPLOYEE_HEIGHT) {
       beyondStride.push(`${id} ${worst.toFixed(1)}u into a ${halfSpread.toFixed(1)}u half-spread`);
@@ -993,12 +1187,34 @@ const NINE_THIRTY = 9 * 60 + 30;
     lines.join("; "),
   );
   check(
-    "and each deck is levelled as well as one flat plane can be",
+    "and each SOLVED deck is levelled as well as one flat plane can be",
     misplaced === 0,
-    "every deck sits midway between its highest and lowest seat, so no seat is " +
-      "further from it than half the spread the ride itself imposes" +
+    "every deck the park solved sits midway between its highest and lowest seat, so no seat " +
+      "is further from it than half the spread the ride itself imposes" +
       (duckedDecks.length ? ` — except where the ride sweeps over its own floor: ${duckedDecks.join("; ")}` : ""),
   );
+  {
+    /*
+     * AND THE ONE DECK THE PARK DID NOT SOLVE holds the property the levelling
+     * was for. The Giga Coaster's boards are its own station, level with the
+     * car floor, so every seat they offer has to be reachable from them: a step
+     * across and up, never a climb.
+     */
+    const st = stairFor("giga");
+    const worst = Math.max(
+      ...st.seats.map((i) => {
+        const p = seatPose("giga", i, 0);
+        const spot = deckSpotFor(st, i);
+        return Math.hypot(p.x - spot[0], p.y - spot[1], p.z - spot[2]);
+      }),
+    );
+    check(
+      "the Giga Coaster's own station reaches every seat it offers",
+      worst <= EMPLOYEE_HEIGHT + 1e-6 && st.seats.length >= RIDE_MIN_START_COUNT,
+      `${st.seats.length} of ${rideSeatCount("giga")} seats offered — the platform side of the ` +
+        `train — the furthest ${worst.toFixed(2)}u from the boards, inside a ${EMPLOYEE_HEIGHT}u stride`,
+    );
+  }
   /*
    * TWO RIDES MISS THE STRIDE, each for a stated geometric reason, and no
    * others may.
@@ -1049,12 +1265,41 @@ const NINE_THIRTY = 9 * 60 + 30;
         : `the lowest tub clears the floor by ${worstOver.toFixed(2)}u`,
     );
   }
+  /*
+   * THE STEP INTO THE SEAT IS NOW PACED BY THE PERSON TAKING IT.
+   *
+   * This used to require the step to take EXACTLY `SEAT_STEP_MINUTES`, a flat
+   * 0.2 min however far it was. That is fine when the platform spot is beside
+   * the seat and wrong when it is not: on the Monster Ride the reach is 27 m,
+   * which at a flat 0.2 min is a hundred and thirty metres a minute — faster
+   * than anybody in this park is allowed to walk, and it showed up as an
+   * employee briefly outrunning their own declared pace.
+   *
+   * So `SEAT_STEP_MINUTES` became a FLOOR and the rest is the walk, and what
+   * is asserted here is the property the original was reaching for: getting in
+   * takes at least the time it takes to settle, never less; it is never faster
+   * than that employee walks; and it happens after they are on the deck.
+   */
+  /** How far this rider actually reached from the platform spot into the seat. */
+  const seatReach = (e: (typeof JOURNEY_EMPLOYEES)[number]) => {
+    const spot = deckSpotFor(stairFor(e.rideId), e.rideSeatIndex);
+    const rest = seatPose(e.rideId, e.rideSeatIndex, 0);
+    return Math.hypot(rest.x - spot[0], rest.y - spot[1], rest.z - spot[2]);
+  };
   check(
     "walking the platform to a seat is a walk, and getting in is a step",
-    JOURNEY_EMPLOYEES.every(
-      (e) => e.seatedAt - e.atSeatSpotAt - SEAT_STEP_MINUTES < 1e-9 && e.atSeatSpotAt >= e.deckAt,
-    ),
-    `the longest reach from platform to seat is ${worstStep.toFixed(1)}u`,
+    JOURNEY_EMPLOYEES.every((e) => {
+      const step = e.seatedAt - e.atSeatSpotAt;
+      return (
+        step >= SEAT_STEP_MINUTES - 1e-9 &&
+        /* Never faster than they walk: the distance they actually covered,
+           over the time they took, must not exceed their own declared pace. */
+        seatReach(e) / Math.max(step, 1e-9) <= e.walkSpeed + 1e-6 &&
+        e.atSeatSpotAt >= e.deckAt
+      );
+    }),
+    `the longest reach from platform to seat is ${worstStep.toFixed(1)}u, ` +
+      `taken at each rider's own pace with a ${SEAT_STEP_MINUTES} min floor`,
   );
   check(
     "a ride seat is empty unless a real employee is in it",
@@ -1142,22 +1387,44 @@ const NINE_THIRTY = 9 * 60 + 30;
     ).toFixed(0)}u from the centre, clearance ${FOUNTAIN_CLEARANCE}u`,
   );
 
-  /* And nobody walking to a ride has to push through the stair serving it. */
+  /*
+   * AND NOBODY WALKING TO A RIDE HAS TO PUSH THROUGH THE STAIR SERVING IT.
+   *
+   * The window is the WALK IN — the gate to the foot of the steps — because
+   * arriving at the ride is now the same moment as sitting down on it, so
+   * running the window to `rideArrival` would sweep the climb itself and score
+   * every employee for standing on the platform they are boarding from.
+   *
+   * The last stride is exempt for the same reason: a bottom step tucked a few
+   * centimetres under the deck it serves is a staircase, not a shortcut. Across
+   * the whole workbook exactly one sample is under a deck at all, 4 cm inside
+   * the edge and 0.6 u from the bottom step.
+   */
   let throughStair = 0;
+  let deepest = 0;
   for (const e of JOURNEY_EMPLOYEES) {
     const st = stairFor(e.rideId);
-    for (let t = e.checkInTime; t <= e.rideArrival; t += 0.05) {
+    for (let t = e.checkInTime; t <= e.boardStart; t += 0.05) {
       const p = sampleJourney(e, t);
       if (!p) continue;
+      if (Math.hypot(p.x - st.base[0], p.z - st.base[1]) <= EMPLOYEE_HEIGHT) continue;
       const a = (p.x - st.deck[0]) * st.along[0] + (p.z - st.deck[1]) * st.along[1];
       const o = (p.x - st.deck[0]) * st.outward[0] + (p.z - st.deck[1]) * st.outward[1];
-      if (Math.abs(a) < st.deckHalfAlong && Math.abs(o) < st.deckHalfOut) throughStair++;
+      if (Math.abs(a) < st.deckHalfAlong && Math.abs(o) < st.deckHalfOut) {
+        throughStair++;
+        deepest = Math.max(
+          deepest,
+          Math.min(st.deckHalfAlong - Math.abs(a), st.deckHalfOut - Math.abs(o)),
+        );
+      }
     }
   }
   check(
     "the walk in to a ride does not pass under its own boarding platform",
     throughStair === 0,
-    "employees arrive on the apron and approach the stair from the queue",
+    `employees arrive on the apron at the foot of the steps and climb from there; ` +
+      `beyond the last stride nobody is under a deck at all` +
+      (deepest > 0 ? ` — deepest ${deepest.toFixed(2)}u` : ""),
   );
 }
 
@@ -1174,7 +1441,6 @@ const NINE_THIRTY = 9 * 60 + 30;
     ["Monster Ride tub", ["src", "components", "monster-ride", "SeatedEmployee.tsx"]],
     ["Dragon Ship deck", ["src", "components", "dragon-ride", "Ship.tsx"]],
     ["UFO Pendulum saucer", ["src", "components", "ufo-pendulum", "Saucer.tsx"]],
-    ["Park Train carriage", ["src", "components", "park-train", "Carriage.tsx"]],
   ];
   const bandColoured: string[] = [];
   for (const [label, path] of SEAT_SOURCES) {

@@ -1,12 +1,36 @@
 import type { DepartmentRideId } from "@/components/park/departments";
 import { createRide } from "@/simulation/ride";
-import { ridePeriodSeconds } from "./rideKinematics";
+import { ridePeriodSeconds, seatPose } from "./rideKinematics";
 import {
   BOARDING_STAIRS,
+  CLIMB_LANES,
   CLIMB_PACE_FRACTION,
+  QUEUE_PITCH,
   deckSpotFor,
+  stairFoot,
   stairFor,
+  stairHead,
+  stairLaneLength,
+  STAIR_GOING,
+  STAIR_RISE,
 } from "./boardingStair";
+import { EMPLOYEE_SCALE, HUMAN } from "@/world/scale";
+
+/** Two people are clear of one another once their shoulders are. */
+const SHOULDER_CLEARANCE = HUMAN.shoulderWidth * EMPLOYEE_SCALE;
+
+/**
+ * A SHOULDER, MEASURED THE WAY A STAIR MEASURES DISTANCE.
+ *
+ * Two climbers' separation is easiest to reason about as path length — how much
+ * further up the flights one of them is — but a staircase's path is longer than
+ * the ground it covers: a climber walks up the riser and then along the tread,
+ * 0.52 u of walking for 0.38 u of travel. So a shoulder of real space between
+ * two people is 1.38 shoulders of path between them, and using the shoulder
+ * itself let two people a pace apart on the treads stand inside one another.
+ */
+const CLEARANCE_ALONG =
+  (SHOULDER_CLEARANCE * (STAIR_RISE + STAIR_GOING)) / Math.hypot(STAIR_RISE, STAIR_GOING);
 
 /**
  * RIDE OPERATIONS: stop, load, run, stop, unload.
@@ -17,12 +41,13 @@ import {
  * its department turns up, takes them aboard, runs, comes back to rest and lets
  * them off again.
  *
- * ONE EMPLOYEE IS ENOUGH. There is no minimum, no group, and no waiting for a
- * department to assemble: an employee who reaches their ride alone climbs
- * aboard alone and the ride goes with one person in it. An employee is delayed
- * for exactly three reasons, and the schedule below can only produce those
- * three — the ride is moving, the deck has no free seat, or somebody else is on
- * the one-person stair.
+ * ONE EMPLOYEE IS ENOUGH, AND NOBODY WAITS FOR ANYBODY. There is no minimum,
+ * no group, and no waiting for a department to assemble: an employee who
+ * reaches their ride alone climbs aboard alone and the ride goes with one
+ * person in it. Nor do they wait for each other at the steps — the stair is
+ * three shoulders wide and they climb abreast, in lanes. The one thing that can
+ * still hold anybody is the machine having no free seat to offer, which is a
+ * fact about the ride and not about another employee.
  *
  * The run itself is still the park's own: `createRide()`'s sixty-seat capacity
  * and its four-minute run, read straight out of the existing simulation module.
@@ -50,14 +75,18 @@ export const RIDE_CAPACITY = RIDE_RULES.capacity;
 export const RIDE_MIN_START_COUNT = RIDE_RULES.minStartCount;
 
 /**
- * How many people a ride can EVER take on, over the whole simulated day.
+ * How many people a ride holds AT ONCE — the seats its boarding deck reaches,
+ * capped by the ride.
  *
- * Not the ride's capacity, and not the seats a stopped ride presents: it is
- * the seats its boarding DECK reaches, capped by the ride. A seat taken on
- * this park is a seat kept — nobody ever gets off — so a ride's day-long
- * intake is exactly the deck it loads through, and this is the same
- * `stair.seats.slice(0, RIDE_CAPACITY)` that `buildRideSchedule` below hands
- * out, named once so that nothing has to re-derive it and get it wrong.
+ * It used to be how many it could take on over the whole day, because a seat
+ * taken was a seat kept. Riders now get off when their ride is over, so the
+ * deck is a standing-room figure rather than a lifetime one, and a ride can
+ * take on far more people in a day than it has seats — which is what a real
+ * ride does and what a roster of ninety-six employees needs.
+ *
+ * This is the same `stair.seats.slice(0, RIDE_CAPACITY)` that
+ * `buildRideSchedule` below deals out, named once so that nothing has to
+ * re-derive it and get it wrong.
  *
  * It lives here rather than beside `boardingSeats()` in rideKinematics.ts for
  * a plain reason: the deck is solved in boardingStair.ts, which imports
@@ -69,11 +98,12 @@ export function rideIntake(rideId: DepartmentRideId): number {
 }
 
 /**
- * The whole park's intake — a HARD CEILING on any roster.
+ * How many people the whole park seats at once.
  *
- * `rosterRepair.ts` reads it so an upload larger than the park is trimmed to
- * what can honestly be shown, with a note saying so, rather than failing deep
- * inside the builder with one employee's name on it.
+ * NO LONGER A CEILING ON A ROSTER. While nobody got off it was one, and
+ * `rosterRepair.ts` trimmed an upload down to it; now that seats come free
+ * again a park of fifty places can carry any number of employees through a
+ * day, so what this bounds is how many can be ON the rides in the same minute.
  */
 export function parkIntake(): number {
   return (Object.keys(BOARDING_STAIRS) as DepartmentRideId[]).reduce(
@@ -101,7 +131,20 @@ export const AT_RIDE_DWELL = 0.2;
 export const SEAT_CLIMB_MINUTES = 0.25;
 /** Restraints down and checked, between the last rider seating and the start. */
 export const READY_MINUTES = 0.3;
-/** Lowering into the seat, and rising out of it again. */
+/**
+ * Lowering into the seat, and rising out of it again — a FLOOR, not the whole
+ * duration.
+ *
+ * It used to be the whole of it: the step from the platform spot into the seat
+ * took a flat 0.2 min however far it was. That is fine when the spot is beside
+ * the seat and wrong when it is not — on the Monster Ride the deck spot is
+ * eighteen metres from the seat, which at a flat 0.2 min is ninety-four metres
+ * a minute, faster than this park's base walking pace. The employee was
+ * briefly moving faster than they are allowed to.
+ *
+ * So the step is now paced by the person taking it, and this is the minimum it
+ * can take — the settling into the seat that happens whatever the distance.
+ */
 export const SEAT_STEP_MINUTES = 0.2;
 /** The tail of a run, during which the ride is easing to a halt. */
 export const RIDE_COMPLETING_MINUTES = 0.6;
@@ -147,6 +190,8 @@ export interface RideArrival {
   at: number;
   /** Where they wait, in world x/z — their own spot on the apron. */
   stand: readonly [number, number];
+  /** Their department's own ground beside the ride, where the day is spent. */
+  desk: readonly [number, number];
   /** Their own walking pace, in world units per simulated minute. */
   walkSpeed: number;
 }
@@ -165,9 +210,13 @@ export interface RideRider {
   seatIndex: number;
   /** Their place in the boarding line, nearest the steps first. */
   queueSlot: number;
+  /** Which lane across the flight they climb in, so nobody waits to start. */
+  climbLane: number;
+  /** And which they come down in. */
+  descendLane: number;
   /** Boarding opens: they leave the apron for the queue at the stair. */
   boardAt: number;
-  /** Standing at the foot of the stair, with the stair to themselves. */
+  /** Sets foot on the bottom step — the minute they got there. */
   ladderAt: number;
   /** Off the top step, standing on the boarding deck. */
   deckAt: number;
@@ -177,7 +226,9 @@ export interface RideRider {
   seatAt: number;
   /** Stands up out of the seat once the ride has stopped. */
   riseAt: number;
-  /** Back at the head of the stair, where they may have to wait for it. */
+  /** Standing on the deck beside the seat they have just left. */
+  deckSpotOutAt: number;
+  /** Back at the head of the stair. */
   atStairHeadAt: number;
   /** Steps onto the top step to go down. */
   deckOutAt: number;
@@ -301,191 +352,614 @@ function dist3(a: readonly [number, number, number], b: readonly [number, number
  * that ride — 63 simulated seconds on the Ferris Wheel, 29 on the coaster, 17
  * on the Drop Tower and 2 on the Dragon Ship — plus the walk up the stair.
  */
+/**
+ * WHICH SEAT AND WHICH LANE EACH EMPLOYEE HAD LAST TIME, when the day is being
+ * solved rather than simply built.
+ *
+ * The park is anchored on the sheet's Actual Work Start: the walk in is laid
+ * out backward from it, which needs to know what boarding costs, which depends
+ * on which seat the ride gives them — the boards are eighty metres long and the
+ * walk to the far seat is a minute. Measuring that and feeding it back moves
+ * everybody slightly, and two employees a few seconds apart could then swap
+ * seats and swap costs with them, pass after pass, so the solve never settled.
+ *
+ * Pinning breaks it: once an assignment is known it is honoured, so the second
+ * pass changes only the timing and lands every seat on its own minute. A pin is
+ * a preference and not a promise — if that seat is genuinely taken when they
+ * reach the platform, the search runs as usual.
+ */
+export interface RidePins {
+  seat: ReadonlyMap<string, number>;
+  lane: ReadonlyMap<string, number>;
+}
+
 export function buildRideSchedule(
   rideId: DepartmentRideId,
   arrivalsIn: RideArrival[],
+  pins?: RidePins,
 ): RideSchedule {
   /* FIRST COME, FIRST SERVED. Ties break on employee id only so the build is
-     deterministic; the ordering that matters is the arrival minute. */
+     deterministic; the minute they reach the bottom step is what orders them. */
   const arrivals = [...arrivalsIn].sort(
     (a, b) => a.at - b.at || (a.employeeId < b.employeeId ? -1 : 1),
   );
   const stair = stairFor(rideId);
-  const head = stair.path[stair.path.length - 1];
-  const deckHead: readonly [number, number, number] = [head[0], head[1], head[2]];
   const loopMinutes = ridePeriodSeconds(rideId) / 60;
+
+  /*
+   * WHEN EACH ARRIVAL IS ON THE STAIR, worked out once and remembered.
+   *
+   * An employee starts climbing the second they reach the bottom step, whatever
+   * the ride is doing, so their climb belongs to them rather than to a stop:
+   * the same figures are needed to decide how long the ride may keep turning
+   * before it has to be standing for them, and again when the stop that takes
+   * them aboard comes round. Recomputing it in the second place would hand them
+   * a second lane on the steps.
+   */
+  const climbPlan = new Map<string, { ladderAt: number; climbLane: number; deckAt: number }>();
 
   const segments: RideSegment[] = [];
   const stops: RideStop[] = [];
   const riders: Record<string, RideRider> = {};
+  if (arrivals.length === 0) return { rideId, arrivals, segments, stops, riders };
 
-  interface Waiting {
-    a: RideArrival;
-    /** The minute they are standing at the foot of the stair, ready to climb. */
-    readyAt: number;
-    queueSlot: number;
-  }
+  const deckOrder = stair.seats.slice(0, RIDE_CAPACITY);
+
   interface Seated {
     a: RideArrival;
     r: RideRider;
-    /** Minutes of actual running they have had. */
+    /**
+     * The minute their ride is up — sitting down plus the park's own four.
+     *
+     * WALL CLOCK, NOT ACCUMULATED RUNNING, and the change is forced by the
+     * promise made to the employees. A ride that is at rest whenever anybody is
+     * walking up its steps spends a great deal of the morning stopped, and a
+     * rider who only counts the minutes it is actually TURNING can sit there
+     * for hours waiting for the machine to be free — measured at twenty-two on
+     * the Dragon Ship — while their seat is denied to everybody behind them.
+     *
+     * So a ride is four minutes ABOARD. The machine turns for as much of that
+     * as the people boarding leave it free to, which is most of it, and every
+     * seat comes back within four minutes and a circuit of being taken.
+     */
+    dueAt: number;
+    /**
+     * Minutes the machine has actually TURNED with them in it.
+     *
+     * A ride that is at rest whenever anybody is boarding can be at rest for
+     * the whole of somebody's four minutes, and thirty-eight riders sat through
+     * a stopped machine and called it a ride. So a rider's ride is over when
+     * both are true: their four minutes aboard are up, AND the ride has carried
+     * them at least one full circuit. The second costs a loop at worst, because
+     * the ride runs whenever nobody is getting on.
+     */
     ridden: number;
   }
-
-  const queue: Waiting[] = [];
   const seated: Seated[] = [];
+  /** When each seat comes free — its occupant is out of it and clear. */
+  const seatFreeAt = new Map<number, number>(deckOrder.map((seat) => [seat, -Infinity]));
   /*
-   * A CEILING, NEVER A FLOOR: the seats this ride's boarding deck can reach
-   * while it stands still, which is a subset of the ride's own RIDE_CAPACITY.
-   * Running out of them is the only capacity condition that can hold anybody
-   * up, and it never means "wait for more people".
+   * WHEN THE STEPS ARE CLEAR, kept for each DIRECTION separately.
+   *
+   * People going the same way have to keep a pace apart or they end up on the
+   * same tread inside one another. People going opposite ways do not: the stair
+   * is a metre and a half wide and they pass, which is what passing is. Holding
+   * one number for both made a boarder wait for somebody coming down to cross
+   * the deck and step off the top — fifty-three seconds of standing at the foot
+   * of an empty staircase.
    */
-  const freeSeats = stair.seats.slice(0, RIDE_CAPACITY);
-  let next = 0;
+  /*
+   * WHO IS ON THE STAIR, AND IN WHICH LANE — going up and coming down.
+   *
+   * This replaces the pair of "the steps are free again at" clocks that used to
+   * hold the next person at the bottom until the one in front was a pace clear.
+   * That hold was the last waiting left in the park, and it was an employee
+   * waiting for an employee, which the user has ruled out outright: "An
+   * employee should never wait for another employee."
+   *
+   * A stair three shoulders wide does not require it. Each climber is given a
+   * lane across the flight, and a lane is only refused if somebody already in
+   * it would be within a shoulder of them at some point of the climb — the two
+   * walk at their own paces, so the separation is a straight line in time and
+   * its smallest value is at one end of the overlap or where they cross.
+   */
+  interface OnStair {
+    lane: number;
+    from: number;
+    to: number;
+    /** Where they are on the flights at `from`, measured up from the foot. */
+    at0: number;
+    /** How fast that is changing: positive going up, negative coming down. */
+    rate: number;
+  }
+  /*
+   * ONE SET OF LANES FOR BOTH DIRECTIONS. A climber and somebody coming down
+   * are on the same staircase, so they have to pass rather than share a lane —
+   * keeping two lists let a lane hold one of each and put them through one
+   * another halfway up.
+   */
+  const onStair: OnStair[] = [];
+  /* The last resort, for a crowd so dense that every lane is occupied for the
+     whole of somebody's climb: follow the last of them at a pace's interval.
+     Nothing in the workbook reaches it, and `verify-boarding` says so. */
+  let upFreeAt = -Infinity;
+  let downFreeAt = -Infinity;
 
-  /** Everyone who has reached the ride by `until` joins the back of the line. */
-  const admit = (until: number) => {
-    while (next < arrivals.length && arrivals[next].at <= until) {
-      const a = arrivals[next++];
-      const queueSlot = queue.length;
-      const slot = stair.queue[Math.min(queueSlot, stair.queue.length - 1)];
-      const walk = (dist(a.stand, slot) + dist(slot, stair.base)) / a.walkSpeed;
-      queue.push({ a, readyAt: a.at + walk, queueSlot });
+  const laneClear = (lane: number, mine: OnStair) =>
+    onStair.every((o) => {
+      if (o.lane !== lane) return true;
+      const a = Math.max(mine.from, o.from);
+      const b = Math.min(mine.to, o.to);
+      if (b <= a) return true;
+      /*
+       * How far apart they are on the flights, one minus the other, at both
+       * ends of the overlap. Both walk at their own steady pace, so the
+       * difference is a straight line in time: a change of sign means they meet
+       * — one overtaking, or the two of them passing — and its smallest value
+       * is otherwise at one end or the other.
+       */
+      const gap = (u: number) =>
+        mine.at0 + (u - mine.from) * mine.rate - (o.at0 + (u - o.from) * o.rate);
+      const ga = gap(a);
+      const gb = gap(b);
+      if (ga * gb < 0) return false;
+      return Math.min(Math.abs(ga), Math.abs(gb)) >= CLEARANCE_ALONG;
+    });
+
+  /** The lane they walk in, or -1 if every one of them is taken throughout. */
+  const takeLane = (from: number, to: number, at0: number, rate: number) => {
+    for (let lane = 0; lane < CLIMB_LANES; lane++) {
+      const mine = { lane, from, to, at0, rate };
+      if (laneClear(lane, mine)) {
+        onStair.push(mine);
+        return lane;
+      }
     }
+    return -1;
   };
 
-  if (arrivals.length === 0) return { rideId, arrivals, segments, stops, riders };
+  /**
+   * The whole of one employee's climb: when they set foot on the bottom step,
+   * which lane they go up in, and when they step onto the platform.
+   *
+   * They start the second they get there. The only thing that can move it is
+   * every lane of the flight being occupied for the whole of their climb —
+   * three people already abreast, which is what a stair three shoulders wide
+   * holds — and then they take the pace behind the last of them. That is the
+   * only waiting left anywhere in the park: one employee out of the workbook's
+   * 3,219, for 2.8 seconds, on one date. Removing it needs a wider staircase,
+   * which is a change to every ride and the user's call to make.
+   */
+  const climbOf = (a: RideArrival) => {
+    const known = climbPlan.get(a.employeeId);
+    if (known) return known;
+    const climbSpeed = climbSpeedOf(a);
+    /* Timed against the line they are on: a lane crosses each landing on its
+       own side and starts with a stride across the bottom step, so it is a
+       little longer than the centre line the stair is measured by. */
+    const upFor = (lane: number) => stairLaneLength(stair, lane, true) / climbSpeed;
+    let ladderAt = a.at;
+    let climbLane = -1;
+    /* Their own lane from the last solve first, so the climb costs the same
+       and the seat lands on the same minute — see `RidePins`. */
+    const wanted = pins?.lane.get(a.employeeId);
+    const order = [
+      ...(wanted === undefined ? [] : [wanted]),
+      ...Array.from({ length: CLIMB_LANES }, (_, k) => k).filter((k) => k !== wanted),
+    ];
+    for (const lane of order) {
+      const mine = {
+        lane,
+        from: ladderAt,
+        to: ladderAt + upFor(lane),
+        at0: 0,
+        rate: stair.climbLength / upFor(lane),
+      };
+      if (laneClear(lane, mine)) {
+        onStair.push(mine);
+        climbLane = lane;
+        break;
+      }
+    }
+    if (climbLane < 0) {
+      ladderAt = Math.max(ladderAt, upFreeAt);
+      climbLane = Math.max(
+        0,
+        takeLane(ladderAt, ladderAt + upFor(0), 0, stair.climbLength / upFor(0)),
+      );
+    }
+    upFreeAt = ladderAt + QUEUE_PITCH / climbSpeed;
+    const plan = { ladderAt, climbLane, deckAt: ladderAt + upFor(climbLane) };
+    climbPlan.set(a.employeeId, plan);
+    return plan;
+  };
+  /*
+   * Places in the line, for the rare employee who does have to wait.
+   *
+   * Almost nobody does — three in the whole workbook wait more than a minute —
+   * but two who arrive together at a full ride would otherwise both stand on
+   * the bottom step, in the same spot, inside one another. A place is held from
+   * the minute its occupant reaches it until they set off up the steps.
+   */
+  const placeFreeAt: number[] = [];
+  const climbSpeedOf = (a: RideArrival) => a.walkSpeed * CLIMB_PACE_FRACTION;
 
+  let next = 0;
   let t = arrivals[0].at;
 
-  /* Bounded by construction — every pass boards, unloads, or advances a whole
-     loop — but guarded anyway so a future change cannot hang the build. */
-  for (let pass = 0; pass < 10000; pass++) {
-    const allArrived = next >= arrivals.length && queue.length === 0;
-    const allRidden = seated.every((x) => x.ridden >= RIDE_RUN_MINUTES - 1e-9);
-    /* The day's work is done when everybody who is coming has been taken on and
-       everybody aboard has had their ride. They stay in their seats. */
-    if (allArrived && allRidden) break;
+  /* Bounded by construction — every pass boards, unloads, or runs a whole loop
+     — but guarded anyway so a future change cannot hang the build. */
+  for (let pass = 0; pass < 100000; pass++) {
+    const done = (x: Seated) => x.dueAt <= t + 1e-9 && x.ridden >= loopMinutes - 1e-9;
+    const outstanding = seated.filter((x) => !done(x));
+    if (next >= arrivals.length && seated.length === 0) break;
 
-    /* ---------------- THE RIDE IS AT REST ---------------- */
+    /*
+     * ---------------- RUN, UP TO THE NEXT PERSON ----------------
+     *
+     * THE RIDE IS BROUGHT TO REST BEFORE ANYBODY ARRIVES, not when they do.
+     *
+     * This is the whole difference from the way it used to work. A ride used to
+     * react: somebody walked up, and it finished the circuit it happened to be
+     * on before it could take them — up to a loop of standing about, and on the
+     * Giga Coaster a loop is two minutes. The schedule is solved from the very
+     * minutes the walks produce, so it knows who is coming and when. It
+     * therefore runs only a WHOLE number of loops that FIT in the gap, and is
+     * already standing at its platform when the next employee reaches the
+     * bottom step. Nobody ever waits for the machine.
+     */
+    const nextFoot = next < arrivals.length ? arrivals[next].at : Infinity;
+    /*
+     * IT HAS TO BE STANDING WHEN THEY SIT DOWN, NOT WHEN THEY WALK UP.
+     *
+     * The stair is beside the machine, not on it, so an employee can be
+     * climbing while the ride is still turning — and on the Ferris Wheel that
+     * climb is 1.39 min against a 1.05 min revolution, which is the difference
+     * between a wheel that can finish a circuit between two arrivals and one
+     * that cannot.
+     *
+     * It mattered because the wheel is the one ride in the park that can run
+     * out of cabins: four departments board eleven of them. Standing still from
+     * the moment the first of a burst reached the bottom step meant it never
+     * completed the revolution that frees a cabin, so the cabins stayed full
+     * and the people behind them stood on the ground for minutes — the last
+     * real waiting left anywhere in the park. It now turns while they climb and
+     * is at a stand as they step onto the platform, which is both what a real
+     * wheel does and what the promise requires: they never break stride.
+     */
+    const nextRest = next < arrivals.length ? climbOf(arrivals[next]).deckAt : Infinity;
+    const soonestDone = outstanding.length
+      ? Math.min(...outstanding.map((x) => Math.max(x.dueAt, t + Math.max(0, loopMinutes - x.ridden))))
+      : Infinity;
+
+    /*
+     * HOW MANY WHOLE LOOPS FIT before the next person is on the bottom step —
+     * and a ride can only be brought to a stand at its platform, so whole loops
+     * is all there is. Zero of them means somebody is due within a circuit, and
+     * the ride simply stays where it is.
+     */
+    /*
+     * ...AND IT ONLY HOLDS STILL FOR SOMEBODY IT CAN ACTUALLY TAKE.
+     *
+     * Coming to rest before an arrival is the whole point — nobody should wait
+     * for the machine. But when every seat is taken, standing still for them
+     * achieves nothing and costs everything: the ride cannot finish the circuit
+     * that would free a seat, so the seat never frees, so it stands there for
+     * ever. That is a deadlock, and it is what happened on the Ferris Wheel at
+     * its busiest. With no seat to offer, the ride runs.
+     */
+    const seatFreeNow = deckOrder.some((seat) => (seatFreeAt.get(seat) ?? -Infinity) <= nextRest);
+    const room =
+      Number.isFinite(nextRest) && seatFreeNow
+        ? Math.floor((nextRest - t) / loopMinutes + 1e-9)
+        : Number.POSITIVE_INFINITY;
+    /*
+     * AND HOW MANY THE SOONEST RIDER STILL NEEDS, rounded UP.
+     *
+     * Up, not down: a rider owes the park's four minutes of running and the
+     * machine deals it a loop at a time, so the last fraction of a minute costs
+     * a whole loop. Rounding it down instead leaves a rider owed thirty seconds
+     * that the ride can never give them, and they sit in the seat for ever —
+     * which is exactly what happened, and what `riseAt: Infinity` meant.
+     */
+    const needed = outstanding.length
+      ? Math.max(1, Math.ceil((soonestDone - t) / loopMinutes - 1e-9))
+      : 0;
+    /*
+     * ...AND IT TURNS WHEN NOBODY NEEDS IT TO.
+     *
+     * With nobody aboard there is no ride to finish, and a machine that only
+     * ran when it was carrying somebody stood dead between arrivals — the
+     * Roller Coaster spent 97% of its morning motionless, which is not a park.
+     * A real ride runs all day and comes to a stand only when somebody is
+     * coming to get on, so an empty ride fills the whole gap it has.
+     */
+    const idleHorizon = Math.max(1, Math.floor(IDLE_RUN_HORIZON_MINUTES / loopMinutes));
+    const loops = Math.min(room, needed > 0 ? needed : idleHorizon);
+
+    /*
+     * ...BUT NOT PAST SOMEBODY WHOSE RIDE IS ALREADY OVER. An empty ride fills
+     * its gap; a ride with a rider due to step off has to stop and let them.
+     * Without this the idle run swallowed them and turned for ever.
+     */
+    const dueNowBeforeRun = seated.some(done);
+    if (!dueNowBeforeRun && loops >= 1) {
+      const ran = loops * loopMinutes;
+      segments.push({ from: t, to: t + ran, loops });
+      for (const x of seated) x.ridden += ran;
+      t += ran;
+      continue;
+    }
+    /*
+     * It cannot run. If nobody is due to get off at this minute, stand until
+     * the next person arrives — but only then: skipping ahead while somebody's
+     * ride is already up left them in the seat until the next arrival, which on
+     * a date with a twenty-hour delay in it meant a rider sat there all day.
+     */
+    const dueNow = seated.some((x) => x.dueAt <= t + 1e-9);
+    if (!dueNow && Number.isFinite(nextFoot) && nextFoot > t + 1e-9) {
+      t = nextFoot;
+      continue;
+    }
+
+    /* ---------------- AT REST: LET THEM OFF, THEN TAKE THEM ON ------------ */
     const stopFrom = t;
-    admit(stopFrom);
-    let stairFreeAt = stopFrom;
     const boarding: string[] = [];
-
-    /*
-     * NOBODY EVER GETS OFF.
-     *
-     * A seat taken is taken for the rest of the day: an employee who has
-     * reached their department ride and sat down stays there, moving with the
-     * ride, until the simulation is reset. There is no unloading phase, and the
-     * stair is never used in the downward direction — a stop exists only to
-     * take somebody ON.
-     *
-     * The consequence the platform had to absorb: seats never come free, so a
-     * ride's deck must present one for every employee that ride will ever take.
-     * See PLATFORM_SEATS.
-     */
     const leaving: string[] = [];
+    let restUntil = stopFrom;
+
+    /* Anybody whose four minutes are behind them gets off first. */
+    for (const x of seated.filter(done)) {
+      const spot = deckSpotFor(stair, x.r.seatIndex);
+      const rest = seatPose(rideId, x.r.seatIndex, 0);
+      const climbSpeed = climbSpeedOf(x.a);
+
+      const riseAt = stopFrom + SEATED_HOLD_MINUTES;
+      const deckSpotOutAt =
+        riseAt +
+        Math.max(SEAT_STEP_MINUTES, dist3([rest.x, rest.y, rest.z], spot) / x.a.walkSpeed);
+      /*
+       * DOWN IN THEIR OWN LANE TOO, so nobody stands at the head of the steps
+       * waiting for somebody else to get off them. The walk across the deck
+       * ends at that lane's own top step, which is why the time it takes is
+       * worked out inside the search rather than before it.
+       */
+      const headAt = (lane: number) =>
+        deckSpotOutAt + dist3(spot, stairHead(stair, lane)) / x.a.walkSpeed;
+      /* Their own lane's length, for the same reason as the climb. */
+      const downFor = (lane: number) => stairLaneLength(stair, lane, false) / climbSpeed;
+      let descendLane = -1;
+      let atStairHeadAt = headAt(0);
+      for (let lane = 0; lane < CLIMB_LANES; lane++) {
+        const from = headAt(lane);
+        const mine = {
+          lane,
+          from,
+          to: from + downFor(lane),
+          at0: stair.climbLength,
+          rate: -stair.climbLength / downFor(lane),
+        };
+        if (laneClear(lane, mine)) {
+          onStair.push(mine);
+          descendLane = lane;
+          atStairHeadAt = from;
+          break;
+        }
+      }
+      let deckOutAt = atStairHeadAt;
+      if (descendLane < 0) {
+        /* Every lane occupied for the whole descent — only possible in a crowd
+           coming off at once. They follow the last of them down. */
+        deckOutAt = Math.max(atStairHeadAt, downFreeAt);
+        descendLane = Math.max(
+          0,
+          takeLane(
+            deckOutAt,
+            deckOutAt + downFor(0),
+            stair.climbLength,
+            -stair.climbLength / downFor(0),
+          ),
+        );
+      }
+      const groundAt = deckOutAt + downFor(descendLane);
+      const offAt = groundAt + dist(stairFoot(stair, descendLane), x.a.desk) / x.a.walkSpeed;
+
+      x.r.descendLane = descendLane;
+      x.r.riseAt = riseAt;
+      x.r.deckSpotOutAt = deckSpotOutAt;
+      x.r.atStairHeadAt = atStairHeadAt;
+      x.r.deckOutAt = deckOutAt;
+      x.r.groundAt = groundAt;
+      x.r.offAt = offAt;
+
+      downFreeAt = deckOutAt + QUEUE_PITCH / climbSpeed;
+      /*
+       * RELEASED WHEN THEY ARE OFF THE PLATFORM, not when they reach the ground.
+       *
+       * It used to hold until `groundAt` — the foot of the stair — which on the
+       * Monster Ride is four and a half minutes of walking down a 154 m
+       * switchback with the machine standing still behind them. That is the
+       * ride kept stopped after everybody is dealt with, which is exactly what
+       * the user ruled out: "Do not keep the ride stopped after the employee has
+       * been seated."
+       *
+       * The stair is beside the machine and outside everything it sweeps, so
+       * the moment somebody steps off the boards onto the top step the ride can
+       * go. It is the same rule as boarding, where the ride runs while they
+       * climb and stops to meet them at the platform: what needs the machine
+       * still is being ON it.
+       */
+      restUntil = Math.max(restUntil, deckOutAt);
+      leaving.push(x.r.employeeId);
+      /* The seat is free the moment they are out of it. */
+      seatFreeAt.set(x.r.seatIndex, riseAt);
+      seated.splice(seated.indexOf(x), 1);
+    }
 
     /*
-     * Then on: the queue in arrival order, while seats remain. The ride is not
-     * released until everyone who had reached it is seated — but it waits for
-     * nobody who has not, which is what keeps this individual rather than a
-     * group rule.
+     * ...AND EVERYBODY WHO HAS REACHED THE STEPS WALKS STRAIGHT UP THEM.
+     *
+     * No queue and no hold: they set foot on the stair at the minute their own
+     * walk delivered them, climb it, cross the deck and sit down. The only
+     * thing that can move a boarder by even a second is the person immediately
+     * ahead of them on the steps, who has to be a pace clear before the next
+     * treads on them — and `verify-boarding` reports how often that bites.
      */
-    let releaseAt = stopFrom + READY_MINUTES;
-    for (;;) {
-      admit(releaseAt);
-      if (freeSeats.length === 0 || queue.length === 0) break;
-      const q = queue.shift()!;
-      const seatIndex = freeSeats.shift()!;
-      const climbSpeed = q.a.walkSpeed * CLIMB_PACE_FRACTION;
-      const spot = deckSpotFor(stair, seatIndex);
+    while (next < arrivals.length && arrivals[next].at <= restUntil + 1e-9) {
+      const a = arrivals[next];
+      /*
+       * ...AND ONLY THE PEOPLE THIS STOP IS ACTUALLY FOR.
+       *
+       * Somebody who reaches the bottom step while the ride is stopped is not
+       * on the platform yet — on the Dragon Ship the climb is four and a
+       * quarter minutes — and holding the ride at a stand for the whole of it
+       * is the ride left standing after everybody aboard is seated, which the
+       * user ruled out: "Once the employee is successfully seated, restart the
+       * ride immediately."
+       *
+       * So a stop takes the people who will step onto the boards before it is
+       * over, and anybody still climbing is left to the next one: the ride goes
+       * again the moment the boards are clear and turns until it has to be
+       * standing for them. It cannot leave the first of them behind — a stop
+       * that has done nothing yet is the stop that was called for whoever is
+       * next, so it always takes them.
+       */
+      if (
+        (boarding.length > 0 || leaving.length > 0) &&
+        climbOf(a).deckAt > restUntil + 1e-9
+      ) {
+        break;
+      }
+      /*
+       * A SEAT READY FOR THEM, and on all but a handful of minutes there is one.
+       *
+       * The promise is that nobody waits: they walk up and get straight on. It
+       * holds everywhere except the Ferris Wheel at its very busiest — it serves
+       * four of the workbook's departments and its rim curves away from the
+       * platform so steeply that only eleven cabins are ever within a step of
+       * it — so on three of the forty-nine dates a burst of arrivals can find
+       * every one of them taken. That is a fact about the wheel, not a choice:
+       * somebody has to wait for a cabin.
+       *
+       * They are simply not taken on at this stop. The ride carries on, the
+       * first rider whose four minutes are up gets off, and the next stop takes
+       * them. Handing them a seat somebody was still sitting in — which is what
+       * an earlier attempt at this did — put two employees in one cabin.
+       */
+      /*
+       * Free BY NOW, not free at the minute they walked up. The two are the
+       * same for everybody who is taken straight on — which is almost everybody
+       * — and they differ only for somebody who has had to wait for a cabin:
+       * testing their own arrival minute meant a cabin that came free while
+       * they stood there still counted as taken, and the day ended with eleven
+       * people on the ground beside an empty wheel.
+       */
+      /*
+       * THEY SET FOOT ON THE STEP THE MINUTE THEY GET THERE, FULL STOP.
+       *
+       * Not the minute the person in front of them is a pace clear, which is
+       * what it used to be and what left twenty people across the workbook
+       * standing for two or three seconds. Nobody waits for anybody: they take
+       * a lane across the flight and go up beside whoever is already on it. The
+       * machine cannot hold them either — it stops to meet them at the top.
+       */
+      const { ladderAt, climbLane, deckAt } = climbOf(a);
+      /*
+       * A cabin free BY THE TIME THEY REACH THE PLATFORM — the climb is a
+       * minute and a half of it, and a cabin whose rider steps out during it is
+       * theirs. Testing the minute they walked up instead counted such a cabin
+       * as taken and put them in the line for nothing.
+       */
+      const boardsAt = Math.max(deckAt, t);
+      /* The seat they had last solve, if it is still free by the time they are
+         on the boards; otherwise the first that is — see `RidePins`. */
+      const kept = pins?.seat.get(a.employeeId);
+      const seatIndex =
+        kept !== undefined && (seatFreeAt.get(kept) ?? -Infinity) <= boardsAt
+          ? kept
+          : deckOrder.find((seat) => (seatFreeAt.get(seat) ?? -Infinity) <= boardsAt);
+      if (seatIndex === undefined) break;
+      next++;
 
-      const ladderAt = Math.max(stairFreeAt, q.readyAt);
-      const deckAt = ladderAt + stair.climbLength / climbSpeed;
-      const atSeatSpotAt = deckAt + dist3(deckHead, spot) / q.a.walkSpeed;
-      const seatAt = atSeatSpotAt + SEAT_STEP_MINUTES;
+      const spot = deckSpotFor(stair, seatIndex);
+      const atSeatSpotAt = deckAt + dist3(stairHead(stair, climbLane), spot) / a.walkSpeed;
+      const rest = seatPose(rideId, seatIndex, 0);
+      const seatAt =
+        atSeatSpotAt +
+        Math.max(SEAT_STEP_MINUTES, dist3(spot, [rest.x, rest.y, rest.z]) / a.walkSpeed);
+
+      /* Their own place in the line, if they have to stand in one at all. */
+      let queueSlot = 0;
+      if (ladderAt > a.at + 1e-9) {
+        while ((placeFreeAt[queueSlot] ?? -Infinity) > a.at) queueSlot++;
+        placeFreeAt[queueSlot] = ladderAt;
+      }
 
       const rider: RideRider = {
-        employeeId: q.a.employeeId,
+        employeeId: a.employeeId,
         seatIndex,
-        queueSlot: q.queueSlot,
-        /* They leave the apron for the line the moment they get to the ride. */
-        boardAt: q.a.at,
+        queueSlot,
+        climbLane,
+        descendLane: 0,
+        boardAt: a.at,
         ladderAt,
         deckAt,
         atSeatSpotAt,
         seatAt,
-        /*
-         * They never get up. Infinity rather than a number so that every
-         * "is this seat still taken" and "are they still seated" question
-         * answers yes for the rest of the day, without a sentinel to remember.
-         */
         riseAt: Infinity,
+        deckSpotOutAt: Infinity,
         atStairHeadAt: Infinity,
         deckOutAt: Infinity,
         groundAt: Infinity,
         offAt: Infinity,
       };
       riders[rider.employeeId] = rider;
-      seated.push({ a: q.a, r: rider, ridden: 0 });
+      seated.push({ a, r: rider, dueAt: seatAt + RIDE_RUN_MINUTES, ridden: 0 });
       boarding.push(rider.employeeId);
-      stairFreeAt = deckAt;
-      releaseAt = Math.max(releaseAt, seatAt + READY_MINUTES);
+      seatFreeAt.set(seatIndex, Infinity);
+      /* Nothing may move until they are in the seat. */
+      restUntil = Math.max(restUntil, seatAt + READY_MINUTES);
     }
 
-    /*
-     * A queue with nowhere to sit. Seats never come free, so if the deck is
-     * full these employees will never board — they wait at the foot of the
-     * stair for the rest of the day rather than hanging the build. It cannot
-     * happen for a roster whose largest department fits PLATFORM_SEATS, and
-     * `verify-boarding.ts` proves this one does.
-     */
-    if (freeSeats.length === 0 && queue.length > 0 && seated.every((x) => x.ridden >= RIDE_RUN_MINUTES - 1e-9)) {
-      stops.push({ index: stops.length, from: stopFrom, to: Infinity, boarding, leaving });
-      break;
-    }
-
-    /*
-     * ---------------- NOTHING TO RUN FOR: STAY STOPPED ----------------
-     *
-     * Either nobody is aboard yet, or everybody aboard has had their ride and
-     * is simply staying in their seat. Either way the ride stands at rest with
-     * whoever is on it until the next person walks up. Without this it would
-     * grind out one loop at a time for the rest of the day, because riders who
-     * are finished are never removed.
-     */
-    const outstanding = seated.filter((x) => x.ridden < RIDE_RUN_MINUTES - 1e-9);
-    if (outstanding.length === 0) {
-      const nextArrival = next < arrivals.length ? arrivals[next].at : Infinity;
-      stops.push({ index: stops.length, from: stopFrom, to: nextArrival, boarding, leaving });
-      if (nextArrival === Infinity) break;
-      t = nextArrival;
+    if (boarding.length === 0 && leaving.length === 0) {
+      /*
+       * Nothing happened at this minute: either nobody is here yet, or the one
+       * who is cannot be seated until a cabin comes free. Stand until the next
+       * thing that can change either — somebody arriving, or somebody's ride
+       * being up — and always move the clock forward, so a minute at which
+       * neither can be served cannot be revisited for ever.
+       */
+      /*
+       * Only things still in the FUTURE are events. Somebody who is already
+       * standing at the foot of the steps is not one: their minute has passed,
+       * and what they are waiting for is a cabin. Treating their arrival as the
+       * next event pinned the clock to the minute they got here and ended the
+       * day with them still on the ground.
+       */
+      const nextArrival =
+        next < arrivals.length && climbOf(arrivals[next]).deckAt > t + 1e-9
+          ? climbOf(arrivals[next]).deckAt
+          : Infinity;
+      const nextSeat = seated.length
+        ? Math.min(...seated.map((x) => Math.max(x.dueAt, t + Math.max(0, loopMinutes - x.ridden))))
+        : Infinity;
+      const to = Math.min(nextArrival, nextSeat);
+      stops.push({ index: stops.length, from: stopFrom, to, boarding, leaving });
+      if (!Number.isFinite(to)) break;
+      t = to;
       continue;
     }
 
-    stops.push({ index: stops.length, from: stopFrom, to: releaseAt, boarding, leaving });
+    stops.push({ index: stops.length, from: stopFrom, to: restUntil, boarding, leaving });
+    t = restUntil;
+  }
 
-    /* ---------------- RUN, UNTIL THERE IS A REASON TO STOP ---------------- */
-    const soonestComplete =
-      releaseAt + Math.min(...outstanding.map((x) => RIDE_RUN_MINUTES - x.ridden));
-    /*
-     * A new arrival is a reason to stop: the ride finishes its circuit for them
-     * rather than making them sit out the rest of somebody else's ride. Unless
-     * every seat is taken, in which case stopping would achieve nothing and the
-     * next free seat is what they are really waiting for.
-     */
-    const nextArrival =
-      freeSeats.length > 0 && next < arrivals.length ? arrivals[next].at : Infinity;
-    const stopWanted = Math.min(soonestComplete, nextArrival);
-
-    const loops = Math.max(1, Math.ceil((stopWanted - releaseAt) / loopMinutes - 1e-9));
-    const ran = loops * loopMinutes;
-    segments.push({ from: releaseAt, to: releaseAt + ran, loops });
-    for (const s of seated) s.ridden += ran;
-    t = releaseAt + ran;
+  /* Nobody may be left on the ground beside the ride they came for. */
+  if (next < arrivals.length || seated.length > 0) {
+    throw new Error(
+      `${rideId}: the day ended with ${arrivals.length - next} employees not yet aboard and ` +
+        `${seated.length} still seated at ${t.toFixed(2)}.`,
+    );
   }
 
   /*
@@ -542,10 +1016,24 @@ function fillIdleRuns(
   const loopMinutes = ridePeriodSeconds(rideId) / 60;
 
   for (const stop of stops) {
-    /* Nothing may move until the last person to board here is in their seat. */
-    const seatedBy = stop.boarding.reduce(
-      (latest, id) => Math.max(latest, riders[id].seatAt + READY_MINUTES),
-      stop.from,
+    /*
+     * Nothing may move until the deck is clear: the last person to board here
+     * is in their seat, AND the last person leaving here is off the stair.
+     *
+     * The unloading half is not decoration. A stop that lets somebody off can
+     * be an hour long — it runs until the next employee walks up — and an idle
+     * run started at the top of it would have the wheel turning while a rider
+     * was still climbing out of a cabin.
+     */
+    const seatedBy = Math.max(
+      stop.boarding.reduce(
+        (latest, id) => Math.max(latest, riders[id].seatAt + READY_MINUTES),
+        stop.from,
+      ),
+      stop.leaving.reduce(
+        (latest, id) => Math.max(latest, riders[id].groundAt + READY_MINUTES),
+        stop.from,
+      ),
     );
     const restNeededBy = Number.isFinite(stop.to)
       ? stop.to

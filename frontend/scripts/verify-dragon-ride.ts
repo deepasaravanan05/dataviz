@@ -7,7 +7,6 @@ import {
   MUZZLE_LENGTH,
 } from "../src/components/dragon-ride/dragonProfile";
 import { rideById } from "../src/components/park/layout";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -45,7 +44,6 @@ import {
 } from "../src/components/dragon-ride/riders";
 import { classifyDelay } from "../src/simulation/classification";
 import { createRide, findFreeSeat } from "../src/simulation/ride";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
 import { COASTER_ORIGIN } from "../src/components/roller-coaster/constants";
 import { MONSTER_ORIGIN, RIDE_REACH as MONSTER_REACH } from "../src/components/monster-ride/constants";
 import {
@@ -382,21 +380,11 @@ for (const [name, box] of Object.entries(BOXES)) {
  * from where it actually stands.
  */
 const placedDragon = rideById("dragon");
-const worldTrackPts = Array.from({ length: 3000 }, (_, i) => {
-  const p = TRACK_CURVE.getPointAt(i / 3000);
-  return [p.x * TRAIN_SCALE, p.z * TRAIN_SCALE] as const;
-});
-const trackGap =
-  Math.min(
-    ...worldTrackPts.map(([x, z]) =>
-      Math.hypot(x - placedDragon.center[0], z - placedDragon.center[1]),
-    ),
-  ) - Math.max(placedDragon.halfX, placedDragon.halfZ);
-check(
-  "clear of the park train's loop",
-  trackGap > 4,
-  `${trackGap.toFixed(1)} m between the rails and the ride's own footprint`,
-);
+/*
+ * THE RAILWAY CHECK IS GONE. This asserted that the ride's footprint stood
+ * clear of the park railway's rails. The train and its track have been removed
+ * from the park at the user's request, so there is no railway to clear.
+ */
 
 check(
   "sits BEFORE the roller coaster on the entrance side",
@@ -420,7 +408,6 @@ for (const [name, dir] of [
   ["roller-coaster", "roller-coaster"],
   ["ferris-wheel", "ferris-wheel"],
   ["monster-ride", "monster-ride"],
-  ["park-train", "park-train"],
 ] as const) {
   const files = readFileSync(join(repo, "src", "components", dir, "constants.ts"), "utf8");
   check(

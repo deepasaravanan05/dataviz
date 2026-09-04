@@ -1,4 +1,17 @@
 import { readFileSync } from "node:fs";
+import {
+  LAKE_CLEARANCE_RADIUS,
+  PARK_ORIGIN,
+  RADIAL_PATH_LENGTH,
+  RIDE_PLOT_RADIUS,
+  RIDE_RING_RADIUS,
+  RIDE_SLOT_BEARING,
+  radialStart,
+  rideEntrance,
+  ringRadiusOf,
+  ringCenterOf,
+  type RingRideId,
+} from "../src/components/park/parkRing";
 import { join } from "node:path";
 import {
   BASE_HEIGHT,
@@ -50,16 +63,10 @@ import {
   trainStateAt,
 } from "../src/components/super-looper/loopMotion";
 import {
-  COMFORT_SLACK,
-  MARGINS,
-  NEIGHBOUR_ID,
   RIDE_CENTER,
   RIDE_FACING,
-  distanceToNeighbour,
-  hidesARide,
-  slackAt,
 } from "../src/components/super-looper/placement";
-import { MAIN_VIEWPOINT, PARK_LAYOUT, rideById } from "../src/components/park/layout";
+import { PARK_LAYOUT, rideById } from "../src/components/park/layout";
 import { rideForDepartment } from "../src/components/park/departments";
 import { LOOPER_SIGN } from "../src/components/super-looper/sign";
 import {
@@ -445,88 +452,144 @@ check(
     `${Math.hypot(LOOPER_SIGN.position[0] - rx, LOOPER_SIGN.position[1] - rz).toFixed(1)} m from ` +
       `the loop, ride reach ${OVERALL_REACH.toFixed(1)} m`,
   );
+  /*
+   * The sign reads "UI/UX", which is what the user called this ride. The
+   * workbook spells that department "design" — the sign is a LABEL and the
+   * roster is the data, so they are allowed to differ — and the property being
+   * protected is unchanged: naming a ride moved nobody. Design staff still walk
+   * to the Ferris Wheel, and nobody is routed to the Super Looper.
+   */
+  const DESIGN = rideForDepartment("design");
   check(
-    "and naming it moved NOBODY — UI/UX staff still walk to the Ferris Wheel",
-    rideForDepartment(LOOPER_TEAM_NAME).rideId === "ferris" &&
+    "and naming it moved NOBODY — design staff still walk to the Ferris Wheel",
+    DESIGN.rideId === "ferris" &&
       JOURNEY_EMPLOYEES.every((e) => (e.rideId as string) !== LOOPER_RIDE_ID),
-    `UI/UX is mapped to ${rideForDepartment(LOOPER_TEAM_NAME).rideName}, and no employee is ` +
-      `routed to this ride`,
+    `the sign says ${LOOPER_TEAM_NAME}; design is mapped to ${DESIGN.rideName}, and no ` +
+      `employee is routed to this ride`,
   );
 }
 
-/* ================= 4. IT FOUND GROUND THAT WAS ALREADY CLEAR ================= */
+/* ================= 4. ITS SLOT ON THE PARK RING ================= */
 
-for (const { what, slack } of slackAt(rx, rz)) {
+/*
+ * THE BRIEF THAT PUT THIS RIDE HERE HAS CHANGED, and the checks change with it
+ * rather than being deleted.
+ *
+ * It was asked for "near to the roller coaster", and the placement walked out
+ * from the coaster's own footprint until the ground would take it.
+ * This section then re-measured every margin that search had honoured, and
+ * asserted that the ride hid nothing from the main entrance.
+ *
+ * The park is a ring now. Every attraction has a numbered slot, the slots are
+ * solved together in `parkRing.ts` so a neighbour cannot crowd this ride
+ * however anything is resized, and `verify-park-layout.ts` measures the
+ * clearance between all ten in one place instead of each ride vouching for
+ * itself. What is left to check HERE is that this ride is actually standing on
+ * the slot it was given, and that the slot puts it where the plan says: on its
+ * own bearing, at the ring's radius, with its inner edge on the apron the ring
+ * path serves.
+ *
+ * The sightline check is gone, and not because it regressed. A concentric park
+ * puts five of its ten attractions on the far side of the lake from the gate,
+ * so from the entrance the near half stands in front of the far half by
+ * construction — that is what a ring IS. The property that replaces it, that
+ * every attraction holds its own share of the overview frame, is measured
+ * through the real camera in `verify-night.ts`.
+ */
+{
+  const dx = RIDE_CENTER[0] - PARK_ORIGIN[0];
+  const dz = RIDE_CENTER[1] - PARK_ORIGIN[1];
+  const radius = Math.hypot(dx, dz);
+  const bearing = (Math.atan2(dx, dz) * 180) / Math.PI;
+
   check(
-    `it clears ${what}`,
-    slack >= 0,
-    `${slack >= 0 ? "+" : ""}${slack.toFixed(1)} m beyond the margin it owes ` +
-      `(reach ${OVERALL_REACH.toFixed(1)} m)`,
+    "it stands exactly on its slot bearing, with nothing across it",
+    Math.abs(bearing - RIDE_SLOT_BEARING.looper) < 1e-9,
+    `${bearing.toFixed(6)}deg against the plan's ${RIDE_SLOT_BEARING.looper}deg`,
+  );
+  check(
+    "and at exactly the ring radius — the same as every other ride",
+    Math.abs(radius - RIDE_RING_RADIUS) < 1e-9 && Math.abs(radius - ringRadiusOf()) < 1e-9,
+    `${radius.toFixed(3)} m from the middle, and there is only one such radius`,
+  );
+  check(
+    "its platform is the park's one plot size, and its machine fits inside it",
+    RIDE_PLOT_RADIUS >= OVERALL_REACH,
+    `a ${(RIDE_PLOT_RADIUS * 2).toFixed(0)} m platform holding a ${(OVERALL_REACH * 2).toFixed(0)} m ride`,
+  );
+  const entrance = rideEntrance("looper");
+  const start = radialStart("looper");
+  check(
+    "its radial path runs down its own bearing, from the food court to its entrance",
+    Math.abs(
+      Math.atan2(start[0] - PARK_ORIGIN[0], start[1] - PARK_ORIGIN[1]) -
+        Math.atan2(entrance[0] - PARK_ORIGIN[0], entrance[1] - PARK_ORIGIN[1]),
+    ) < 1e-9,
+    `entrance at (${entrance[0].toFixed(1)}, ${entrance[1].toFixed(1)})`,
+  );
+  check(
+    "and it is the same length as every other radial in the park",
+    Math.abs(Math.hypot(entrance[0] - start[0], entrance[1] - start[1]) - RADIAL_PATH_LENGTH) < 1e-6,
+    `${Math.hypot(entrance[0] - start[0], entrance[1] - start[1]).toFixed(1)} m, ` +
+      `against a plan length of ${RADIAL_PATH_LENGTH.toFixed(1)} m`,
+  );
+  check(
+    "it is clear of the food court in the middle of the park",
+    radius - OVERALL_REACH > LAKE_CLEARANCE_RADIUS,
+    `inner edge ${(radius - OVERALL_REACH).toFixed(0)} m out, court ${LAKE_CLEARANCE_RADIUS} m`,
   );
 }
-check(
-  "and with room in hand, not by three centimetres",
-  Math.min(...slackAt(rx, rz).map((s) => s.slack)) >= COMFORT_SLACK - 1e-9,
-  `tightest margin ${Math.min(...slackAt(rx, rz).map((s) => s.slack)).toFixed(1)} m over, ` +
-    `against the ${COMFORT_SLACK} m the search insists on`,
-);
+
 {
   /*
-   * "place the ride near to the roller coaster"
+   * WHICH WAY IT FACES, measured rather than assumed.
    *
-   * Near is measured to the coaster's own FOOTPRINT rather than to its centre
-   * — its box is 166 m by 124 m, so the two are a hundred metres apart — and
-   * what is asserted is that no legal ground is nearer. The park's own rule
-   * sets the floor: twelve metres between a ride footprint and anything else,
-   * measured from this ride's reach, plus the slack the search insists on.
+   * The ride's local +X is its long axis — the plane of a loop, the line of a
+   * circuit, the front of a platform — and a group rotated by `alpha` about +Y
+   * carries local +X to (cos alpha, -sin alpha) in world x/z. Presented to the
+   * people looking at it, that has to come out perpendicular to the line from
+   * the ride to the middle of the park.
+   *
+   * It used to be measured against the MAIN ENTRANCE, which was the same thing
+   * while every ride stood in a fan in front of the gate. On a ring it is not:
+   * people reach this ride off the ring path, which runs inside it.
    */
-  const coaster = PARK_LAYOUT.find((r) => r.id === NEIGHBOUR_ID)!;
-  const gap = distanceToNeighbour(rx, rz);
+  const axisX = Math.cos(RIDE_FACING);
+  const axisZ = -Math.sin(RIDE_FACING);
+  const outX = RIDE_CENTER[0] - PARK_ORIGIN[0];
+  const outZ = RIDE_CENTER[1] - PARK_ORIGIN[1];
+  const outLen = Math.hypot(outX, outZ) || 1;
+  const dot = (axisX * outX + axisZ * outZ) / outLen;
+  const offBroadside = (Math.acos(Math.min(1, Math.abs(dot))) * 180) / Math.PI;
   check(
-    "IT STANDS BESIDE THE ROLLER COASTER, as close as the park's own margins allow",
-    Math.abs(gap - (OVERALL_REACH + MARGINS.ride + COMFORT_SLACK)) < 2.5 &&
-      Math.min(
-        ...PARK_LAYOUT.filter((r) => r.id !== NEIGHBOUR_ID).map((r) =>
-          Math.hypot(
-            Math.max(r.minX - rx, 0, rx - r.maxX),
-            Math.max(r.minZ - rz, 0, rz - r.maxZ),
-          ),
-        ),
-      ) > gap,
-    `${gap.toFixed(1)} m off the coaster's footprint — the nearest ride to it by far, and ` +
-      `against a floor of ${(OVERALL_REACH + MARGINS.ride).toFixed(1)} m (reach + the park's ` +
-      `${MARGINS.ride} m) plus ${COMFORT_SLACK} m in hand. Its centre is ` +
-      `${Math.hypot(rx - coaster.center[0], rz - coaster.center[1]).toFixed(0)} m away because ` +
-      `the coaster's box is ${(coaster.maxX - coaster.minX).toFixed(0)} m across`,
+    "it presents itself broadside to the ring path, not end-on",
+    Math.abs(offBroadside - 90) < 1e-6,
+    `${offBroadside.toFixed(4)}deg between its long axis and the line in to the middle`,
   );
 }
-check(
-  "it hides no ride from the entrance — the park's fan is undisturbed",
-  !hidesARide(rx, rz),
-  `nothing nearer than it shares its slice of the view from ` +
-    `(${MAIN_VIEWPOINT[0]}, ${MAIN_VIEWPOINT[1]}) — standing behind something is allowed, ` +
-    `standing in front of it is not`,
-);
-check(
-  "its loop faces the entrance broadside, so it reads as a ring and not a line",
-  (() => {
-    /* Local +X lies along the loop's plane; it must be square to the sightline. */
-    const planeX = Math.cos(RIDE_FACING);
-    const planeZ = -Math.sin(RIDE_FACING);
-    const toX = RIDE_CENTER[0] - MAIN_VIEWPOINT[0];
-    const toZ = RIDE_CENTER[1] - MAIN_VIEWPOINT[1];
-    const len = Math.hypot(toX, toZ) || 1;
-    return Math.abs((planeX * toX + planeZ * toZ) / len) < 1e-9;
-  })(),
-  `the loop's plane is exactly perpendicular to the line of sight from the main viewpoint`,
-);
 
 /* ================= 5. NOTHING ELSE MOVED ================= */
 
 check(
-  "the ride is not in the park layout — the solver was never re-run",
-  PARK_LAYOUT.length === 5 && !PARK_LAYOUT.some((r) => r.id === LOOPER_RIDE_ID),
-  `${PARK_LAYOUT.length} rides in the solver, as before`,
+  /*
+   * THE PROPERTY, not the count. This used to assert that the layout held five
+   * boxes, which was a fair proxy for "adding this ride did not re-solve the
+   * park" while five was all it ever held. The Giga Coaster has since been
+   * listed there — DevOps ride it, and a ride employees are routed to has to be
+   * findable in the layout — so the count moved while the property did not.
+   *
+   * What actually has to hold is that no ride's position depends on any other's
+   * being listed. Every ride in the layout stands on its OWN ring slot, solved
+   * in `parkRing.ts` from the sizes of all ten attractions, so listing one more
+   * cannot shift the rest; and this ride is not listed at all.
+   */
+  "the ride is not in the park layout, and listing one never moves another",
+  !PARK_LAYOUT.some((r) => r.id === LOOPER_RIDE_ID) &&
+    PARK_LAYOUT.every((r) => {
+      const slot = ringCenterOf(r.id as RingRideId);
+      return Math.hypot(r.center[0] - slot[0], r.center[1] - slot[1]) < 1e-9;
+    }),
+  `${PARK_LAYOUT.length} rides in the layout, each on its own ring slot`,
 );
 check(
   "and the layout module does not know it exists",
@@ -610,10 +673,10 @@ console.log(
     `${CYCLE_SECONDS.toFixed(0)} s a cycle.`,
 );
 console.log(
-  `Standing at (${rx.toFixed(1)}, ${rz.toFixed(1)}) — ${distanceToNeighbour(rx, rz).toFixed(1)} m ` +
-    `off the Roller Coaster's footprint, the nearest clear ground to it, with ` +
-    `${Math.min(...slackAt(rx, rz).map((s) => s.slack)).toFixed(1)} m in hand on every margin the ` +
-    `park keeps. Nothing else moved.`,
+  `Standing at (${rx.toFixed(1)}, ${rz.toFixed(1)}) — slot ${RIDE_SLOT_BEARING.looper}deg, `+
+    `${RIDE_RING_RADIUS.toFixed(0)} m out like every other ride, on a `+
+    `${(RIDE_PLOT_RADIUS * 2).toFixed(0)} m platform reached by a `+
+    `${RADIAL_PATH_LENGTH.toFixed(0)} m radial path. Every ride in the park has the same three.`,
 );
 console.log(failures === 0 ? "\nOK: super looper verified." : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

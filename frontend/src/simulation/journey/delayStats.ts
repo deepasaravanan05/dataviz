@@ -25,7 +25,7 @@ export interface DelayGroup {
 
 export function averageDelay(list: JourneyEmployee[]): number {
   if (list.length === 0) return 0;
-  return list.reduce((sum, e) => sum + e.delayMinutes, 0) / list.length;
+  return list.reduce((sum, e) => sum + e.reportedDelayMinutes, 0) / list.length;
 }
 
 function group(key: string, label: string, list: JourneyEmployee[]): DelayGroup {
@@ -34,7 +34,7 @@ function group(key: string, label: string, list: JourneyEmployee[]): DelayGroup 
     label,
     count: list.length,
     average: averageDelay(list),
-    longest: list.reduce((m, e) => Math.max(m, e.delayMinutes), 0),
+    longest: list.reduce((m, e) => Math.max(m, e.reportedDelayMinutes), 0),
   };
 }
 
@@ -54,7 +54,9 @@ export function delayByDepartment(list: JourneyEmployee[]): DelayGroup[] {
 
 /** The single worst wait in a roster. */
 export function worstDelay(list: JourneyEmployee[]): JourneyEmployee {
-  return list.reduce((worst, e) => (e.delayMinutes > worst.delayMinutes ? e : worst));
+  return list.reduce((worst, e) =>
+    e.reportedDelayMinutes > worst.reportedDelayMinutes ? e : worst,
+  );
 }
 
 /** Longest bar in either breakdown, so both are drawn to one scale. */

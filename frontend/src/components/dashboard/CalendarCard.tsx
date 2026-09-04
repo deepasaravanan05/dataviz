@@ -13,6 +13,13 @@ import { useEffect, useMemo, useState } from "react";
  *
  * `compact` only tightens spacing and type scale for the entrance overlay,
  * where the card sits over the 3D park and must stay out of its way.
+ *
+ * IT IS ALSO THE PARK'S DATE PICKER, when the caller gives it the three
+ * date props. `data/final one.xlsx` records 49 working days and the park
+ * animates one of them at a time, so the days the workbook actually has are
+ * drawn as buttons, the one on screen wears the pill, and clicking another
+ * rebuilds the morning around it. Without those props nothing changes: the
+ * dashboard page still gets the same read-only wall calendar it always had.
  */
 
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -54,12 +61,21 @@ function monthCells(year: number, month: number, withAdjacent: boolean): (Cell |
   return cells;
 }
 
+/** "2026-07-01" for a cell, in the calendar's own local terms. */
+function isoDate(year: number, month: number, day: number): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${year}-${pad(month + 1)}-${pad(day)}`;
+}
+
 export function CalendarCard({
   compact = false,
   initialYear,
   initialMonth,
   navigable = false,
   showAdjacentDays = false,
+  selectableDates,
+  selectedDate,
+  onSelectDate,
 }: {
   compact?: boolean;
   /** Opening year. Defaults to the real current year. */
@@ -70,6 +86,12 @@ export function CalendarCard({
   navigable?: boolean;
   /** Fill the first and last weeks from the neighbouring months. */
   showAdjacentDays?: boolean;
+  /** The dates the dataset actually has, "YYYY-MM-DD". Makes them clickable. */
+  selectableDates?: readonly string[];
+  /** The date the park is animating, which wears the pill. */
+  selectedDate?: string;
+  /** Called with a date the visitor picked. */
+  onSelectDate?: (date: string) => void;
 }) {
   const [today, setToday] = useState<Date | null>(null);
   const fixed = initialYear !== undefined && initialMonth !== undefined;
@@ -106,6 +128,10 @@ export function CalendarCard({
   /* The amber "today" pill only makes sense while the real month is on screen. */
   const isThisMonth =
     !!today && !!view && today.getFullYear() === view.y && today.getMonth() === view.m;
+
+  /* Picking mode: the caller handed us the dataset's own dates. */
+  const picking = !!selectableDates && !!onSelectDate;
+  const available = useMemo(() => new Set(selectableDates ?? []), [selectableDates]);
 
   return (
     <section
@@ -165,27 +191,47 @@ export function CalendarCard({
                 {w}
               </div>
             ))}
-            {cells.map((c, i) => (
-              <div key={i} className="flex items-center justify-center">
-                {c === null ? null : (
-                  <span
-                    className={[
-                      "flex items-center justify-center rounded-full",
-                      cell,
-                      c.outside
-                        ? "text-white/20"
-                        : isThisMonth && c.day === today?.getDate()
-                          ? "bg-amber-400 font-bold text-slate-950"
-                          : i % 7 === 0
-                            ? "text-amber-300/80"
-                            : "text-white/80",
-                    ].join(" ")}
-                  >
-                    {c.day}
-                  </span>
-                )}
-              </div>
-            ))}
+            {cells.map((c, i) => {
+              if (c === null) return <div key={i} className="flex items-center justify-center" />;
+              const iso = c.outside ? null : isoDate(view.y, view.m, c.day);
+              const hasData = !!iso && available.has(iso);
+              const isSelected = !!iso && iso === selectedDate;
+              /* The pill marks the date being animated when the card is a
+                 picker, and the real today when it is the wall calendar. */
+              const pill = picking
+                ? isSelected
+                : isThisMonth && !c.outside && c.day === today?.getDate();
+              const tone = c.outside
+                ? "text-white/20"
+                : pill
+                  ? "bg-amber-400 font-bold text-slate-950"
+                  : hasData
+                    ? "text-white ring-1 ring-amber-300/35 hover:bg-amber-300/20"
+                    : i % 7 === 0
+                      ? "text-amber-300/80"
+                      : "text-white/80";
+              const className = ["flex items-center justify-center rounded-full", cell, tone].join(" ");
+
+              return (
+                <div key={i} className="flex items-center justify-center">
+                  {picking && hasData && iso ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelectDate?.(iso)}
+                      aria-label={`Show ${iso}`}
+                      aria-pressed={isSelected}
+                      className={`${className} transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70`}
+                    >
+                      {c.day}
+                    </button>
+                  ) : (
+                    <span className={picking && !c.outside ? `${className} opacity-45` : className}>
+                      {c.day}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </>
       ) : (

@@ -10,24 +10,34 @@
  */
 
 import { EMPLOYEE_DATASET } from "./dataset";
+import {
+  FOOD_COURT_PATH_RADIUS,
+  FOOD_COURT_PLAZA_RADIUS,
+  FOOD_COURT_POINT,
+  FOOD_COURT_TABLE_INNER_RADIUS,
+  FOOD_COURT_TABLE_OUTER_RADIUS,
+  GATE_INNER_RADIUS,
+  GATE_POINT,
+  SPAWN_RADIUS,
+  ringPoint,
+} from "@/components/park/parkRing";
 
 /**
  * The single main entrance. Every employee enters the park through this gate.
  *
- * IT STEPPED BACK WITH THE PARK, from z = 620 to z = 760. Every ride is now
- * built to one common height; the layout solver spread the five to fit them,
- * the deepest of them now stands at z = 484 rather than z = 290, and the
- * railway that goes round the outside of all of them was refitted to match.
- * At 620 the gate was no longer outside that railway — it was inside the loop,
- * with the rails running between the entrance and the park.
+ * IT IS NO LONGER A PAIR OF TYPED COORDINATES. The park is concentric now, so
+ * the gate is where the park's own axis of symmetry meets its boundary — the
+ * bottom of the plan, on the line that runs straight through the lake — and
+ * `parkRing.ts` works out where that is from the size of the attractions it
+ * has to enclose. It moved out with the park: from z = 760 to the boundary of
+ * a ring that reaches 726 m from the middle in every direction.
  *
- * A gate inside the railway is not an entrance, so the entrance moved out.
  * Everything that reads the gate — the approach road, the spawn line, the
- * walking lanes, the entrance camera, the bearings the attractions are placed
- * on — is derived from these two numbers and follows them out.
+ * walking lanes, the entrance camera, the central avenue — is derived from
+ * these two numbers and follows them out.
  */
-export const GATE_X = 70;
-export const GATE_Z = 760;
+export const GATE_X = GATE_POINT[0];
+export const GATE_Z = GATE_POINT[1];
 
 /**
  * THE MAIN GATE — the Peacock Gate.
@@ -46,9 +56,9 @@ export const GATE_Z = 760;
  * is the onion dome and its finial, which is why the tower height and the gate
  * height are two different numbers.
  *
- * The opening is what the walk-through needs plus ceremony: nine walking lanes
- * at 2.4 m occupy only the central 21.6 m, so the extra span is architecture,
- * not traffic.
+ * The opening is what the walk-through needs plus ceremony: even seventeen
+ * walking lanes at 2.4 m occupy only the central 40.8 m, so the extra span is
+ * architecture, not traffic.
  */
 export const GATE_OPENING = 62;
 export const GATE_PILLAR_HALF = 9.5;
@@ -58,32 +68,55 @@ export const GATE_ARCH_Y = 26;
 export const GATE_HEIGHT = 47;
 
 /** Where employees appear from the outside world, and their first step inside. */
-export const SPAWN_Z = 930;
-export const GATE_INNER_Z = 710;
+export const SPAWN_Z = ringPoint(0, SPAWN_RADIUS)[1];
+export const GATE_INNER_Z = ringPoint(0, GATE_INNER_RADIUS)[1];
 
-/** One walking lane per turnstile, so arrivals fan out instead of queueing on one line. */
-export const LANE_COUNT = 9;
+/**
+ * ONE WALKING LANE PER TURNSTILE, so arrivals fan out instead of queueing on
+ * one line — and there have to be enough of them for the busiest minute the
+ * data contains.
+ *
+ * It was nine, which suited a roster of thirty spread across a morning. The
+ * workbook is a real attendance sheet: on 17 July 2026 fifteen people check in
+ * inside the six-tenths of a minute one turnstile takes, and a gate with nine
+ * of them cannot admit that morning without either making somebody share a
+ * turnstile or moving a check-in time, and neither is allowed.
+ *
+ * Seventeen is that worst minute with headroom, and it is still architecture
+ * the gate already has: seventeen lanes at 2.4 m occupy 40.8 m of a 62 m
+ * opening, so nothing about the Peacock Gate moves to carry them.
+ */
+export const LANE_COUNT = 17;
 export const LANE_SPACING = 2.4;
 
 /**
- * The food court. Chosen by scanning the park interior for the point that
- * maximises clearance from every ride box, the train rails and the plaza while
- * staying inside the train loop and off every ride's sightline from the gate.
- */
-export const FOOD_COURT_CENTER: [number, number] = [208, 464];
-/*
- * The court's keep-out half-extent: how much ground around the centre the
- * planting, the ride signs and the walked routes all stay off.
+ * THE GRAND FOOD COURT — the centrepiece, at the middle of the park.
  *
- * Up from 34 with the pavilion, and now from 38 to 41 with its lengthening. The
- * ceiling on it is the park railway — the nearest rail runs 57 m from the court
- * centre, and verify-journey.ts requires 15 m of daylight between the rail and
- * the court's edge — so 41 is within a metre of the largest this can honestly
- * be while the train still has its own track to itself. The building grew along
- * its frontage and this had to grow with it, or the planting and the walked
- * routes would have been laid straight through the new wings.
+ * It has moved three times and each move was a change of role. It began as a
+ * pavilion tucked into whichever interior pocket cleared every ride, the
+ * railway and every sightline. When the park became concentric it took a plot
+ * beside the entrance avenue. It is now the CENTRE — the thing the whole plan
+ * radiates from — and it replaces the lake and its waterfall outright.
+ *
+ * There is nothing left to solve about where it goes: the middle of a radially
+ * symmetric park is one point, and this is it.
  */
-export const FOOD_COURT_HALF = 41;
+export const FOOD_COURT_CENTER: [number, number] = [...FOOD_COURT_POINT] as [number, number];
+/**
+ * THE COURT'S KEEP-OUT — a RADIUS now, not the half-extent of a square.
+ *
+ * It was 41 m, the half-width of a rectangular pavilion standing off to one
+ * side of the park. The court is the park's centrepiece now: a circular plaza
+ * 500 m across at the middle of the plan, with the pavilion, the stalls, the
+ * colonnade and the seating all inside it. So the figure is the plaza's own
+ * radius, read from `parkRing.ts` rather than typed here, and it is CIRCULAR —
+ * a square keep-out of the same size would have reached 354 m at its corners,
+ * a hundred metres out into the landscaped wedges the plan wants planted.
+ *
+ * The name is kept because a dozen modules and checks read it. What it means
+ * has not changed: the ground the court occupies, that nothing else may use.
+ */
+export const FOOD_COURT_HALF = FOOD_COURT_PLAZA_RADIUS;
 /**
  * The court is laid out in its own local frame — +x to its right, +z toward
  * the gate — and then rotated to face the main entrance. The walkers and the
@@ -95,37 +128,38 @@ export const FOOD_COURT_FACING = Math.atan2(
 );
 
 /**
- * Local-space table centres inside the court.
+ * WHERE THE TABLES ARE: two concentric rings in the plaza.
  *
- * FIVE TABLES OF FOUR — EXACTLY TWENTY SEATS, which is the number the user
- * asked the food court to hold. It was twenty tables of four, eighty seats, in
- * a five-by-four block; eighty was four times what the court has ever needed
- * (the busiest minute of the whole morning puts seven people inside) and the
- * block filled the terrace edge to edge with no room to walk between the files.
+ * The court has been through three arrangements and each one was right for the
+ * building it belonged to. Twenty tables in a five-by-four block filled a
+ * terrace edge to edge with nowhere to walk. Five tables in one file, twenty
+ * seats, suited the 80 m pavilion that replaced it — and twenty was already
+ * generous, since the busiest minute of the whole simulated morning puts seven
+ * people inside.
  *
- * They are set as ONE FILE ACROSS THE TERRACE, at a 6 m pitch, centred on the
- * court's own axis. That is the arrangement the lengthened building asks for:
- * the tables run along the frontage, in front of the serving kiosks, and the
- * terrace keeps a clear 8 m aisle in front of them and another behind, so a
- * diner walks in from the door, down an open aisle, and sits without squeezing
- * past anybody. Six metres between centres is wide by café standards and
- * deliberately so — these are parasol tables on an open terrace, not a canteen.
+ * Neither suits THIS building. The court is now a circular plaza a quarter of
+ * a kilometre across and the centrepiece of the park, so its seating is laid
+ * out the way the rest of the plan is: on concentric rings, evenly spaced, in
+ * the band between the colonnade and the plaza's edge. An inner ring of twelve
+ * and an outer ring of eighteen is thirty tables and a hundred and twenty
+ * seats — a real food court's worth, and the open ground between the two rings
+ * is the aisle diners move along.
+ *
+ * The radii come from `parkRing.ts`, so the seating cannot drift out of the
+ * band the architecture leaves for it.
  */
-const TABLE_COLS = 5;
-const TABLE_ROWS = 1;
-const TABLE_PITCH_X = 6.0;
-const TABLE_PITCH_Z = 3.4;
+const TABLE_RINGS: { radius: number; count: number }[] = [
+  { radius: FOOD_COURT_TABLE_INNER_RADIUS, count: 12 },
+  { radius: FOOD_COURT_TABLE_OUTER_RADIUS, count: 18 },
+];
 
-export const FOOD_COURT_TABLES: [number, number][] = Array.from(
-  { length: TABLE_COLS * TABLE_ROWS },
-  (_, i) => {
-    const col = i % TABLE_COLS;
-    const row = Math.floor(i / TABLE_COLS);
-    return [
-      (col - (TABLE_COLS - 1) / 2) * TABLE_PITCH_X,
-      6 + (row - (TABLE_ROWS - 1) / 2) * TABLE_PITCH_Z,
-    ] as [number, number];
-  },
+export const FOOD_COURT_TABLES: [number, number][] = TABLE_RINGS.flatMap((ring, r) =>
+  Array.from({ length: ring.count }, (_, i) => {
+    /* The outer ring is offset half a step, so a table never sits directly
+       behind another on the same radius from the middle. */
+    const a = ((i + (r % 2) * 0.5) / ring.count) * Math.PI * 2;
+    return [Math.sin(a) * ring.radius, Math.cos(a) * ring.radius] as [number, number];
+  }),
 );
 
 /**
@@ -186,8 +220,15 @@ export const FOOD_COURT_CHAIRS: FoodCourtChair[] = FOOD_COURT_TABLES.flatMap(
   },
 );
 
-/** Local-space entry point, on the gate-facing edge of the terrace. */
-export const FOOD_COURT_DOOR_LOCAL: [number, number] = [0, 22];
+/**
+ * Local-space entry point: where the central avenue meets the plaza.
+ *
+ * The court used to stand off the avenue and be entered through a door 22 m in
+ * front of its pavilion. It is now the middle of the park and the avenue runs
+ * straight at it, so the way in is where the avenue crosses the plaza's edge —
+ * on the court's own axis, which is the park's axis.
+ */
+export const FOOD_COURT_DOOR_LOCAL: [number, number] = [0, FOOD_COURT_PLAZA_RADIUS];
 
 /** Turn a point in the court's local frame into world x/z. */
 export function foodCourtToWorld(local: readonly [number, number]): [number, number] {
@@ -202,6 +243,17 @@ export function foodCourtToWorld(local: readonly [number, number]): [number, num
 
 /** Where employees step in and out of the court, in world x/z. */
 export const FOOD_COURT_DOOR: [number, number] = foodCourtToWorld(FOOD_COURT_DOOR_LOCAL);
+
+/**
+ * WHERE THE COURT MEETS THE RING OF PATHS.
+ *
+ * The junction of the central avenue and the food court's own circular path —
+ * the point a diner steps back out on to when they leave, and the point every
+ * radial path is measured from. It used to be a spur out to a court that stood
+ * off the avenue; now the court IS the middle, so this is simply where the
+ * avenue ends and the circulation begins.
+ */
+export const AVENUE_JOIN: [number, number] = ringPoint(0, FOOD_COURT_PATH_RADIUS);
 
 /**
  * Simulated minutes per real second at 1x.
@@ -247,25 +299,28 @@ export const QUEUE_WAIT_SPAN = 0.8;
 export const QUEUE_SPACING = 0.9;
 
 /**
- * The shortest sit-down that still reads as one, in simulated minutes.
+ * THE SIT IS THE DELAY, so there is no dwell constant here any more.
  *
- * A food-court visit is no longer a configurable dwell: it lasts exactly as
- * long as the employee's own delay leaves once the walking is paid for, so the
- * time on the seat IS the delay being served. This floor exists only so the
- * very shortest delays still show a person sitting rather than touching the
- * chair and standing straight back up. Where a delay is too short to cover the
- * walk plus this floor, the employee walks faster; where even that is not
- * enough, the journey builder reports it rather than skipping the visit.
+ * A food-court visit lasts exactly as long as the employee's own Delay Time —
+ * the gap between the sheet's check-in and its Actual Work Start, to the second
+ * — and the walking to and from the court happens outside it. There used to be
+ * a `MIN_SIT_MINUTES` floor here, from the days when the sit was the delay LESS
+ * the walking and the shortest delays came out at nothing. Nothing floors the
+ * sit now: it is the data, and a one-minute delay is a one-minute sit.
  */
-export const MIN_SIT_MINUTES = 1.5;
 
 /**
- * Check-in window, as minutes-of-day. The attendance sheet's own span, from
- * the earliest arrival (9:33 AM) to the latest (10:45 AM), with an hour of
- * headroom either side so a future roster is not rejected for being early.
+ * Check-in window, as minutes-of-day — the hours the gate is open.
+ *
+ * It used to be 9:00 to 11:00, an hour either side of a thirty-row sheet whose
+ * arrivals all fell in one morning hour. `final one.xlsx` is a real attendance
+ * record and does not: most of its 3,219 check-ins are between 9 and 11, but
+ * 231 of them are before eight in the morning and a few are in the small hours.
+ * The park animates what the sheet says rather than what a working day ought to
+ * look like, so the window is the whole day.
  */
-export const CHECK_IN_OPEN = 9 * 60;
-export const CHECK_IN_CLOSE = 11 * 60;
+export const CHECK_IN_OPEN = 0;
+export const CHECK_IN_CLOSE = 24 * 60;
 
 /**
  * How many employees are in the simulation: the size of the supplied dataset,

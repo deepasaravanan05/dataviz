@@ -2,9 +2,10 @@
 
 import { useMemo } from "react";
 import * as THREE from "three";
-import { PATH_LINKS, PATH_NODES } from "./paths";
+import { PATH_LINKS, PATH_NODES, PATH_RINGS } from "./paths";
+import { BOUNDARY_RADIUS, PARK_ORIGIN } from "@/components/park/parkRing";
 import { BOUNDARY_TREES, PARK_SHRUBS, PARK_TREES, type Planting } from "./planting";
-import { Bench, Bin, LampPost, MAT } from "./kit";
+import { KIT_GEO, MAT } from "./kit";
 import { BORDER_WIDTH, PAVER_BORDER, PAVER_SURFACE } from "./pavingMaterial";
 import { GATE_X, GATE_Z, SPAWN_Z } from "@/simulation/journey/constants";
 import { PROP } from "@/world/scale";
@@ -147,6 +148,32 @@ function Paving() {
           <primitive object={PAVER_SURFACE} attach="material" />
         </mesh>
       ))}
+
+      {/*
+        THE THREE CIRCLES: the lakeside promenade, the ring path and the
+        perimeter road. Each is one annulus rather than a chain of chords —
+        the perimeter road alone is 5.3 km round, and a link chain fine enough
+        to read as a circle would be hundreds of meshes for a shape that
+        `ringGeometry` draws exactly. Segment counts are set from the radius so
+        every circle has the same edge smoothness rather than the same budget.
+      */}
+      {PATH_RINGS.map((r, i) => (
+        <mesh
+          key={`ring${i}`}
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[r.center[0], 0.042, r.center[1]]}
+          receiveShadow
+        >
+          <ringGeometry
+            args={[
+              r.radius - r.width / 2,
+              r.radius + r.width / 2,
+              Math.max(64, Math.round(r.radius / 3)),
+            ]}
+          />
+          <primitive object={PAVER_SURFACE} attach="material" />
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -207,8 +234,21 @@ function RoadBorders() {
     });
   }, [bands]);
 
+  const ringEdges = useMemo(
+    () =>
+      PATH_RINGS.flatMap((r) =>
+        [-1, 1].map((side) => ({
+          center: r.center,
+          radius: r.radius + side * (r.width / 2 - BORDER_WIDTH / 2),
+          segments: Math.max(64, Math.round(r.radius / 3)),
+        })),
+      ),
+    [],
+  );
+
   if (!bands.length) return null;
   return (
+    <group>
     <instancedMesh
       args={[undefined, undefined, bands.length]}
       ref={(inst) => {
@@ -221,6 +261,18 @@ function RoadBorders() {
       <planeGeometry args={[1, BORDER_WIDTH]} />
       <primitive object={PAVER_BORDER} attach="material" />
     </instancedMesh>
+    {/* The same cut-stone course down both edges of every circular way. */}
+    {ringEdges.map((e, i) => (
+      <mesh
+        key={i}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[e.center[0], 0.055, e.center[1]]}
+      >
+        <ringGeometry args={[e.radius - BORDER_WIDTH / 2, e.radius + BORDER_WIDTH / 2, e.segments]} />
+        <primitive object={PAVER_BORDER} attach="material" />
+      </mesh>
+    ))}
+    </group>
   );
 }
 
@@ -357,12 +409,52 @@ function Vegetation() {
   );
 }
 
-/** Lamps, benches and bins along the main ways. */
+/**
+ * Lamps, benches and bins along the main ways — INSTANCED.
+ *
+ * They used to be mounted one React component per prop, which is six meshes a
+ * lamp and four a bench. That was affordable while the only furnished ways
+ * were the two stretches of the entrance spine, about forty lamps in all. The
+ * concentric park furnishes three CIRCLES as well — the perimeter road alone
+ * is 5.3 km round — which took the same code to some five hundred lamps and
+ * over three thousand draw calls, and the scene stopped drawing.
+ *
+ * So every fitting in the park is now one InstancedMesh per part: the same
+ * geometries, the same materials, the same positions, at nine draw calls for
+ * the lot. Each part carries its own local offset, rotated with its prop, so a
+ * lamp head still stands on the correct side of a lamp that faces down a road.
+ */
+interface Prop {
+  at: [number, number];
+  rotation: number;
+}
+
+/** Turns a prop's local part offset into a world transform. */
+function partsOf(
+  props: Prop[],
+  local: { x: number; y: number; z: number; scale?: [number, number, number] },
+): Parameters<typeof useInstanced>[2] {
+  return props.map((p) => {
+    const c = Math.cos(p.rotation);
+    const s = Math.sin(p.rotation);
+    /* Three.js rotates about +Y as x' = x cos + z sin, z' = -x sin + z cos. */
+    return {
+      position: [
+        p.at[0] + local.x * c + local.z * s,
+        local.y,
+        p.at[1] - local.x * s + local.z * c,
+      ] as [number, number, number],
+      scale: (local.scale ?? [1, 1, 1]) as [number, number, number],
+      rotationY: p.rotation,
+    };
+  });
+}
+
 function StreetFurniture() {
-  const items = useMemo(() => {
-    const lamps: { p: [number, number, number]; r: number }[] = [];
-    const benches: { p: [number, number, number]; r: number }[] = [];
-    const bins: [number, number, number][] = [];
+  const { lamps, benches, bins } = useMemo(() => {
+    const lamps: Prop[] = [];
+    const benches: Prop[] = [];
+    const bins: Prop[] = [];
 
     for (const l of PATH_LINKS) {
       if (!l.furnished) continue;
@@ -382,53 +474,121 @@ function StreetFurniture() {
         const cx = l.from[0] + ux * t;
         const cz = l.from[1] + uz * t;
         const off = l.width / 2 + 1.4;
-        lamps.push({ p: [cx + nx * off, 0, cz + nz * off], r: heading });
-        lamps.push({ p: [cx - nx * off, 0, cz - nz * off], r: heading + Math.PI });
+        lamps.push({ at: [cx + nx * off, cz + nz * off], rotation: heading });
+        lamps.push({ at: [cx - nx * off, cz - nz * off], rotation: heading + Math.PI });
         if (i % 2 === 0) {
-          benches.push({ p: [cx + nx * (off + 1.6), 0, cz + nz * (off + 1.6)], r: heading + Math.PI / 2 });
+          benches.push({
+            at: [cx + nx * (off + 1.6), cz + nz * (off + 1.6)],
+            rotation: heading + Math.PI / 2,
+          });
         }
-        if (i % 3 === 0) bins.push([cx - nx * (off + 1.2), 0, cz - nz * (off + 1.2)]);
+        if (i % 3 === 0) bins.push({ at: [cx - nx * (off + 1.2), cz - nz * (off + 1.2)], rotation: 0 });
       }
     }
+
+    /*
+     * And round the circles. A ring is furnished by walking its circumference
+     * at the same 30 m pitch the straight ways use, with a lamp on each edge —
+     * so the perimeter road and the ring path are lit exactly as densely as the
+     * avenue is, rather than being lit by whatever happens to stand near them.
+     */
+    for (const r of PATH_RINGS) {
+      if (!r.furnished) continue;
+      const spacing = 30;
+      const n = Math.max(8, Math.round((Math.PI * 2 * r.radius) / spacing));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const cx = r.center[0] + Math.cos(a) * r.radius;
+        const cz = r.center[1] + Math.sin(a) * r.radius;
+        /* Outward normal of the circle, which is the way the edge runs. */
+        const nx = Math.cos(a);
+        const nz = Math.sin(a);
+        const heading = Math.atan2(-nz, nx);
+        const off = r.width / 2 + 1.4;
+        lamps.push({ at: [cx + nx * off, cz + nz * off], rotation: heading });
+        lamps.push({ at: [cx - nx * off, cz - nz * off], rotation: heading + Math.PI });
+        if (i % 3 === 0) {
+          benches.push({
+            at: [cx - nx * (off + 1.6), cz - nz * (off + 1.6)],
+            rotation: heading + Math.PI / 2,
+          });
+        }
+        if (i % 5 === 0) bins.push({ at: [cx + nx * (off + 1.2), cz + nz * (off + 1.2)], rotation: 0 });
+      }
+    }
+
     return { lamps, benches, bins };
   }, []);
 
+  /* One arm and head per lamp, on the +X side, exactly as `LampPost` mounts them. */
+  const lampBases = useInstanced(KIT_GEO.lampBase, MAT.concreteDark, partsOf(lamps, { x: 0, y: 0.15, z: 0 }), false);
+  const lampPosts = useInstanced(KIT_GEO.lampPost, MAT.steelDark, partsOf(lamps, { x: 0, y: PROP.lampHeight / 2, z: 0 }));
+  const lampArms = useInstanced(KIT_GEO.lampArm, MAT.steelDark, partsOf(lamps, { x: 0.45, y: PROP.lampHeight - 0.15, z: 0 }), false);
+  const lampHeads = useInstanced(KIT_GEO.lampHead, MAT.lampGlow, partsOf(lamps, { x: 0.85, y: PROP.lampHeight - 0.25, z: 0 }), false);
+  const lampHalos = useInstanced(KIT_GEO.lampHalo, MAT.lampHalo, partsOf(lamps, { x: 0.85, y: PROP.lampHeight - 0.25, z: 0 }), false);
+
+  const benchSeats = useInstanced(KIT_GEO.benchSeat, MAT.wood, partsOf(benches, { x: 0, y: PROP.benchSeatY, z: 0 }));
+  const benchBacks = useInstanced(KIT_GEO.benchBack, MAT.wood, partsOf(benches, { x: 0, y: PROP.benchSeatY + 0.2, z: -0.2 }));
+  const benchLegsA = useInstanced(KIT_GEO.benchLeg, MAT.steelDark, partsOf(benches, { x: -PROP.benchLength / 2 + 0.15, y: PROP.benchSeatY / 2, z: 0 }), false);
+  const benchLegsB = useInstanced(KIT_GEO.benchLeg, MAT.steelDark, partsOf(benches, { x: PROP.benchLength / 2 - 0.15, y: PROP.benchSeatY / 2, z: 0 }), false);
+
+  const binBodies = useInstanced(KIT_GEO.binBody, MAT.steelDark, partsOf(bins, { x: 0, y: PROP.binHeight / 2, z: 0 }));
+  const binLids = useInstanced(KIT_GEO.binLid, MAT.steel, partsOf(bins, { x: 0, y: PROP.binHeight + 0.03, z: 0 }), false);
+
   return (
     <group>
-      {items.lamps.map((l, i) => (
-        <LampPost key={`l${i}`} position={l.p} rotation={l.r} />
-      ))}
-      {items.benches.map((b, i) => (
-        <Bench key={`b${i}`} position={b.p} rotation={b.r} />
-      ))}
-      {items.bins.map((p, i) => (
-        <Bin key={`n${i}`} position={p} />
-      ))}
+      <primitive object={lampBases} />
+      <primitive object={lampPosts} />
+      <primitive object={lampArms} />
+      <primitive object={lampHeads} />
+      <primitive object={lampHalos} />
+      <primitive object={benchSeats} />
+      <primitive object={benchBacks} />
+      <primitive object={benchLegsA} />
+      <primitive object={benchLegsB} />
+      <primitive object={binBodies} />
+      <primitive object={binLids} />
     </group>
   );
 }
 
-/** The property boundary: a real fence around the whole park, with a gap for the road. */
+/**
+ * The property boundary: a real fence around the whole park, with a gap for
+ * the gate.
+ *
+ * A CIRCLE now, not an ellipse guessed at by hand. It used to be centred at
+ * (150, 250) with radii 655 and 735 — numbers that fitted the old fan of
+ * attractions and had to be re-guessed every time one of them moved. The park
+ * is concentric, so its boundary is a circle about the same point as
+ * everything else at the radius `parkRing.ts` reserves, outside the perimeter
+ * road with a landscaped setback between them.
+ *
+ * The gap is angular rather than a slab of x, because on a circle those are
+ * different things: it is the arc the gate and its arcade wings occupy,
+ * measured at the boundary radius.
+ */
 function Perimeter() {
   const { posts, panels } = useMemo(() => {
     const posts: Parameters<typeof useInstanced>[2] = [];
     const panels: Parameters<typeof useInstanced>[2] = [];
-    const cx = 150;
-    const cz = 250;
-    const rx = 655;
-    const rz = 735;
-    const STEPS = 900;
+    const cx = PARK_ORIGIN[0];
+    const cz = PARK_ORIGIN[1];
+    const r = BOUNDARY_RADIUS;
+    const STEPS = 1400;
+    /* Half the gate opening plus its pillars and wings, as an angle. */
+    const GATE_HALF_ARC = Math.atan(78 / r);
 
     for (let i = 0; i < STEPS; i++) {
-      const a = (i / STEPS) * Math.PI * 2;
-      const x = cx + Math.cos(a) * rx;
-      const z = cz + Math.sin(a) * rz;
-      // Leave the arrival road open.
-      if (Math.abs(x - GATE_X) < 52 && z > GATE_Z) continue;
+      /* Measured from the gate bearing, so the gap is centred on the axis. */
+      const a = Math.PI / 2 - (i / STEPS) * Math.PI * 2;
+      const x = cx + Math.cos(a) * r;
+      const z = cz + Math.sin(a) * r;
+      const bearing = Math.atan2(x - cx, z - cz);
+      if (Math.abs(bearing) < GATE_HALF_ARC) continue;
 
-      const an = ((i + 1) / STEPS) * Math.PI * 2;
-      const nx = cx + Math.cos(an) * rx;
-      const nz = cz + Math.sin(an) * rz;
+      const an = Math.PI / 2 - ((i + 1) / STEPS) * Math.PI * 2;
+      const nx = cx + Math.cos(an) * r;
+      const nz = cz + Math.sin(an) * r;
       const heading = Math.atan2(nx - x, nz - z);
       const seg = Math.hypot(nx - x, nz - z);
 
@@ -482,13 +642,21 @@ function DistantLandscape() {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
 
+    /*
+     * All three bands are measured OUT FROM THE BOUNDARY rather than from a
+     * pair of typed coordinates. They used to start 700 m from (150, 250),
+     * which was outside the old fence and is inside the new one — a park that
+     * grows has to take its landscape with it, or the hills end up in the car
+     * park.
+     */
+    const OUTSIDE = BOUNDARY_RADIUS + 40;
     const berms: Parameters<typeof useInstanced>[2] = [];
     for (let i = 0; i < 60; i++) {
       const ang = (i / 60) * Math.PI * 2 + rand() * 0.1;
-      const r = 700 + rand() * 220;
+      const r = OUTSIDE + rand() * 260;
       const w = 60 + rand() * 90;
       berms.push({
-        position: [150 + Math.cos(ang) * r, -1.5, 250 + Math.sin(ang) * r],
+        position: [PARK_ORIGIN[0] + Math.cos(ang) * r, -1.5, PARK_ORIGIN[1] + Math.sin(ang) * r],
         scale: [w, 5 + rand() * 9, w * (0.6 + rand() * 0.5)],
         rotationY: rand() * Math.PI,
       });
@@ -497,10 +665,10 @@ function DistantLandscape() {
     const hills: Parameters<typeof useInstanced>[2] = [];
     for (let i = 0; i < 46; i++) {
       const ang = (i / 46) * Math.PI * 2 + rand() * 0.14;
-      const r = 1900 + rand() * 1500;
+      const r = OUTSIDE * 2.2 + rand() * 1500;
       const w = 420 + rand() * 700;
       hills.push({
-        position: [150 + Math.cos(ang) * r, -14, 250 + Math.sin(ang) * r],
+        position: [PARK_ORIGIN[0] + Math.cos(ang) * r, -14, PARK_ORIGIN[1] + Math.sin(ang) * r],
         scale: [w, 70 + rand() * 190, w * (0.7 + rand() * 0.6)],
         rotationY: rand() * Math.PI,
       });
@@ -512,10 +680,10 @@ function DistantLandscape() {
       const base = (cluster / 4) * Math.PI * 2 + 0.6;
       for (let i = 0; i < 34; i++) {
         const ang = base + (rand() - 0.5) * 0.55;
-        const r = 2350 + rand() * 700;
+        const r = OUTSIDE * 2.9 + rand() * 700;
         const h = 60 + rand() * 240;
         skyline.push({
-          position: [150 + Math.cos(ang) * r, h / 2 - 6, 250 + Math.sin(ang) * r],
+          position: [PARK_ORIGIN[0] + Math.cos(ang) * r, h / 2 - 6, PARK_ORIGIN[1] + Math.sin(ang) * r],
           scale: [26 + rand() * 46, h, 26 + rand() * 46],
           rotationY: rand() * Math.PI,
         });

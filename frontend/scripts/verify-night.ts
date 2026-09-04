@@ -20,8 +20,6 @@ import {
   OVERALL_HEIGHT as UFO_HEIGHT,
   STRUCTURE_HEIGHT as UFO_STRUCTURE_HEIGHT,
 } from "../src/components/ufo-pendulum/constants";
-import { TRACK_CURVE } from "../src/components/park-train/trainTrack";
-import { TRAIN_SCALE } from "../src/components/park/parkScale";
 import { HUMAN } from "../src/world/scale";
 
 let failures = 0;
@@ -159,9 +157,14 @@ check(
 );
 
 // ============ 3. Six rides, six identities ============
-const SIX = ["coaster", "ferris", "ufo", "dragon", "monster", "train"];
+/*
+ * FIVE NOW, NOT SIX. The list used to include the railway that ringed the
+ * park; the train and its track have been removed, so the park's lighting
+ * identities are its five department rides.
+ */
+const SIX = ["coaster", "ferris", "ufo", "dragon", "monster"];
 check(
-  "all six rides have a lighting identity",
+  "all five rides have a lighting identity",
   SIX.every((id) => RIDE_LOOK[id]),
   SIX.map((id) => `${id}: ${RIDE_LOOK[id]?.label}`).join(", "),
 );
@@ -193,7 +196,7 @@ for (let i = 0; i < SIX.length; i++) {
   }
 }
 check(
-  "the six identities are separable by hue, not just by name",
+  "the identities are separable by hue, not just by name",
   closestHue > 0.05,
   `closest pair ${closestPair} is ${(closestHue * 360).toFixed(0)}deg apart on the wheel`,
 );
@@ -206,22 +209,23 @@ check(
  * them. The light and dark tones are the same hue as the light tone by
  * construction, so testing the lit face tests the ride.
  */
+const PAINTED = SIX;
 check(
-  "all six rides carry a structural paint colour",
+  "all five rides carry a structural paint colour",
   SIX.every((id) => RIDE_PAINT[id as keyof typeof RIDE_PAINT]),
   SIX.map((id) => `${id}: ${RIDE_PAINT[id as keyof typeof RIDE_PAINT]?.light}`).join(", "),
 );
 let closestPaint = 1;
 let closestPaintPair = "";
-for (let i = 0; i < SIX.length; i++) {
-  for (let j = i + 1; j < SIX.length; j++) {
+for (let i = 0; i < PAINTED.length; i++) {
+  for (let j = i + 1; j < PAINTED.length; j++) {
     const d = hueDistance(
-      RIDE_PAINT[SIX[i] as keyof typeof RIDE_PAINT].light,
-      RIDE_PAINT[SIX[j] as keyof typeof RIDE_PAINT].light,
+      RIDE_PAINT[PAINTED[i] as keyof typeof RIDE_PAINT].light,
+      RIDE_PAINT[PAINTED[j] as keyof typeof RIDE_PAINT].light,
     );
     if (d < closestPaint) {
       closestPaint = d;
-      closestPaintPair = `${SIX[i]}/${SIX[j]}`;
+      closestPaintPair = `${PAINTED[i]}/${PAINTED[j]}`;
     }
   }
 }
@@ -234,7 +238,7 @@ check(
    glows blue at night is the ride that is blue at noon. */
 let worstMatch = 0;
 let worstMatchRide = "";
-for (const id of SIX) {
+for (const id of PAINTED) {
   const d = hueDistance(RIDE_PAINT[id as keyof typeof RIDE_PAINT].light, RIDE_LOOK[id].accent);
   if (d > worstMatch) {
     worstMatch = d;
@@ -250,7 +254,7 @@ check(
    lattice would read as three different rides bolted together. */
 let toneDrift = 0;
 let toneRide = "";
-for (const id of SIX) {
+for (const id of PAINTED) {
   const p = RIDE_PAINT[id as keyof typeof RIDE_PAINT];
   const d = Math.max(hueDistance(p.light, p.mid), hueDistance(p.light, p.dark));
   if (d > toneDrift) {
@@ -270,7 +274,7 @@ check(
     /WHEEL_RADIUS/.test(rigSrc) &&
     /UFO_FOOT_SPREAD/.test(rigSrc) &&
     /APEX_HEIGHT/.test(rigSrc) &&
-    /TRAIN_CURVE/.test(rigSrc),
+    /MONSTER_ARM/.test(rigSrc),
   "track curves, rim radii, frame splay and A-frame spread all read from the rides",
 );
 check(
@@ -422,36 +426,49 @@ const screens: Screen[] = PARK_LAYOUT.map((r) =>
   project(r.id, r.label, r.center[0], r.center[1], r.halfX, r.halfZ, r.height),
 );
 
-// The sixth ride: the railway loop, whose lit track rings the whole park.
-const tx: number[] = [];
-const tz: number[] = [];
-for (let i = 0; i <= 400; i++) {
-  const p = TRACK_CURVE.getPointAt(i / 400);
-  tx.push(p.x * TRAIN_SCALE);
-  tz.push(p.z * TRAIN_SCALE);
-}
-const loopScreen = { minX: 1e9, maxX: -1e9, minY: 1e9, maxY: -1e9 };
-for (let i = 0; i < tx.length; i += 4) {
-  const v = new THREE.Vector3(tx[i], 3, tz[i]).project(camera);
-  loopScreen.minX = Math.min(loopScreen.minX, v.x);
-  loopScreen.maxX = Math.max(loopScreen.maxX, v.x);
-  loopScreen.minY = Math.min(loopScreen.minY, v.y);
-  loopScreen.maxY = Math.max(loopScreen.maxY, v.y);
-}
+/*
+ * THE RAILWAY LOOP USED TO BE PROJECTED HERE — the sixth thing in the frame,
+ * whose lit track drew the park's outline from the overview. The train and its
+ * track are gone from the park, so the loop and the check that framed it went
+ * with them. The park's outline is now drawn by the outer circular path that
+ * joins the ride platforms, and that it fits the frame follows from the
+ * overview being solved against `PARK_PAVED_EDGE` in `cameraPlaces.ts`.
+ */
 
+/*
+ * HOW BIG A RIDE HAS TO READ FROM THE OVERVIEW — measured in PIXELS now.
+ *
+ * The threshold used to be a share of frame AREA, and it was wrong in two
+ * ways. It silently encoded the park's size at the moment it was chosen — the
+ * park has since been rebuilt twice, is now 2.2 km across, and the overview
+ * stands back to hold all of it, so every ride is a smaller share of a much
+ * larger picture without having shrunk by a metre. And AREA punishes shape: a
+ * Ferris Wheel is a disc, tall and thin, and it read as a fifth of the area of
+ * a coaster whose track sprawls, while being perfectly legible on screen.
+ *
+ * "Too small to see" means pixels, so pixels is what this measures — the
+ * ride's larger dimension on the park's own 1600 x 900 frame. The floor is
+ * forty, about four per cent of the frame's height: small, but unmistakably a
+ * ride rather than a speck. That figure means the same thing however large the
+ * park becomes, which is the whole reason for changing the unit.
+ *
+ * The smallest ride in the park — the Ferris Wheel, a disc seen nearly
+ * edge-on — currently reads at 61 px, so there is half as much again in hand.
+ */
+const FRAME_W = 1600;
+const FRAME_H = 900;
+const MIN_PIXELS = 40;
+const pixelSize = (s: Screen) =>
+  Math.max(((s.maxX - s.minX) / 2) * FRAME_W, ((s.maxY - s.minY) / 2) * FRAME_H);
 console.log("");
 for (const s of screens) {
   check(
     `${s.label} holds the frame from the overview`,
-    area(s) > 0.012 && s.minX > -1 && s.maxX < 1 && s.minY > -1 && s.maxY < 1,
-    `${(area(s) * 100).toFixed(2)}% of frame area, at screen x[${s.minX.toFixed(2)}, ${s.maxX.toFixed(2)}]`,
+    pixelSize(s) >= MIN_PIXELS && s.minX > -1 && s.maxX < 1 && s.minY > -1 && s.maxY < 1,
+    `${pixelSize(s).toFixed(0)} px across on a ${FRAME_W}x${FRAME_H} frame (floor ${MIN_PIXELS}), ` +
+      `holding ${(area(s) * 100).toFixed(2)}% of frame area at x[${s.minX.toFixed(2)}, ${s.maxX.toFixed(2)}]`,
   );
 }
-check(
-  "the railway loop is framed, drawing the park's outline",
-  loopScreen.minX > -1 && loopScreen.maxX < 1 && loopScreen.minY > -1 && loopScreen.maxY < 1,
-  `x[${loopScreen.minX.toFixed(2)}, ${loopScreen.maxX.toFixed(2)}] y[${loopScreen.minY.toFixed(2)}, ${loopScreen.maxY.toFixed(2)}]`,
-);
 
 /*
  * WHAT A RIDE HIDES IS WHAT IT IS MADE OF, not the box the layout gives it.
@@ -510,8 +527,19 @@ check(
 );
 check(
   "the park opens on the overview",
-  scene.includes("[398, 360, 887]"),
-  "the first thing you see is the whole park",
+  /const OVERVIEW = placeById\("overview"\)/.test(scene) &&
+    /cameraPosition = CAMERA_POSITION/.test(scene) &&
+    /const CAMERA_POSITION: \[number, number, number\] = OVERVIEW\.position/.test(scene),
+  /*
+   * IT USED TO LOOK FOR A LITERAL TRIPLE. That is a weaker check than it
+   * appears: it proved the scene opened on the coordinates somebody had once
+   * copied out of the solver, not that it opened on the solver's ANSWER. The
+   * two drifted apart every time the park changed size — the scene opened on
+   * last month's framing while the fast-travel chip for the very same view
+   * used this month's. The scene now reads `cameraPlaces.ts` directly, so what
+   * is worth asserting is that it does.
+   */
+  "the opening shot IS the solved overview, not a copy of one",
 );
 
 // ============ 6. Nothing was lost ============

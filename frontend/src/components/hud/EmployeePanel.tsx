@@ -144,7 +144,7 @@ function PanelBody({
           Total delay — check-in to work start
         </div>
         <div className="mt-0.5 text-2xl font-black tabular-nums text-white">
-          {Math.round(employee.delayMinutes)} min
+          {employee.reportedDelayMinutes} min
         </div>
         <div className="text-[11px] text-white/45">
           Delay band {employee.delayCategory}

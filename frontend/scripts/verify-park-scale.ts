@@ -1,7 +1,8 @@
 import { RIDE_SCALE, RIDE_TARGET } from "../src/components/park/layout";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PARK_SCALE, PEDESTRIAN_STEP, TOWER_SHIFT_X, TOWER_STEPS_LEFT, TRAIN_SCALE } from "../src/components/park/parkScale";
+import { PARK_SCALE, PEDESTRIAN_STEP, TOWER_SHIFT_X, TOWER_STEPS_LEFT } from "../src/components/park/parkScale";
+import { BOUNDARY_RADIUS, PARK_ORIGIN } from "../src/components/park/parkRing";
 import { PARK_LAYOUT, rideById } from "../src/components/park/layout";
 import { COASTER_ORIGIN } from "../src/components/roller-coaster/constants";
 import { MONSTER_ORIGIN, TOWER_HEIGHT as MONSTER_TOWER } from "../src/components/monster-ride/constants";
@@ -16,14 +17,12 @@ import {
   WHEEL_RADIUS as FERRIS_R,
   WHEEL_CENTER_HEIGHT,
 } from "../src/components/ferris-wheel/constants";
-import { TRACK_CENTER, TRACK_RADIUS_X, TRACK_RADIUS_Z } from "../src/components/park-train/constants";
 import { CABINS } from "../src/components/ferris-wheel/cabinManifest";
 import { countSeatColor as dragonColor } from "../src/components/dragon-ride/riders";
 import { SEAT_COUNT as DRAGON_SEATS } from "../src/components/dragon-ride/constants";
 import { countSeatColor as ufoColor } from "../src/components/ufo-pendulum/riders";
 import { SEAT_COUNT as UFO_SEATS } from "../src/components/ufo-pendulum/constants";
 import { RIDERS as MONSTER_RIDERS } from "../src/components/monster-ride/riders";
-import { TRAIN_RIDERS } from "../src/components/park-train/riders";
 import { SEAT_COUNT as COASTER_SEATS } from "../src/components/roller-coaster/constants";
 
 let failures = 0;
@@ -70,10 +69,13 @@ check(
   !/<group scale=\{(PARK_SCALE|rideScale\("ufo"\))\}>\s*<UfoPendulum/.test(sceneSrc),
   "drawn at the size it declares — its arm is a pendulum, and scaling it would change its period",
 );
+/* "Train track and train share one scale group" used to be checked here — it
+   was what stopped the train drifting off its own rails. Both have been
+   removed from the park, so the claim has nothing left to be about. */
 check(
-  "train track and train share one scale group",
-  /<group scale=\{TRAIN_SCALE\}>\s*<TrainTrack\s*\/>\s*<ParkTrain/.test(sceneSrc),
-  "the train cannot drift off its rails",
+  "the train and its track are gone from the scene, not merely unmounted",
+  !/ParkTrain|TrainTrack|TrainRig/.test(sceneSrc),
+  "no train, no track and no railway lighting is referenced by the scene",
 );
 
 // ============ 2. No ride module was edited to achieve the scaling ============
@@ -81,7 +83,6 @@ for (const [ride, file] of [
   ["ferris-wheel", "constants.ts"],
   ["roller-coaster", "constants.ts"],
   ["monster-ride", "constants.ts"],
-  ["park-train", "constants.ts"],
   ["dragon-ride", "constants.ts"],
 ] as const) {
   const text = readFileSync(join(__dirname, "..", "src", "components", ride, file), "utf8");
@@ -184,15 +185,16 @@ check(
 
 // ============ 6. Ground and trees still cover the enlarged park ============
 const groundSize = Number(sceneSrc.match(/size=\{(\d+)\}/)?.[1] ?? 0);
-const loopMaxX = (TRACK_CENTER[0] + TRACK_RADIUS_X) * TRAIN_SCALE;
-const loopMaxZ = (TRACK_CENTER[1] + TRACK_RADIUS_Z) * TRAIN_SCALE;
-const loopMinX = (TRACK_CENTER[0] - TRACK_RADIUS_X) * TRAIN_SCALE;
-const loopMinZ = (TRACK_CENTER[1] - TRACK_RADIUS_Z) * TRAIN_SCALE;
-const needed = 2 * Math.max(Math.abs(loopMaxX), Math.abs(loopMaxZ), Math.abs(loopMinX), Math.abs(loopMinZ));
+/*
+ * The railway used to be the outermost thing the ground had to carry, so the
+ * requirement was sized from its loop. The train is gone; the outermost thing
+ * is now the boundary, and the ground is measured against that.
+ */
+const needed = 2 * (Math.max(Math.abs(PARK_ORIGIN[0]), Math.abs(PARK_ORIGIN[1])) + BOUNDARY_RADIUS);
 check(
-  "ground plane covers the enlarged park",
+  "ground plane covers the whole property",
   groundSize >= needed,
-  `ground ${groundSize}u vs ${needed.toFixed(0)}u needed for the scaled train loop`,
+  `ground ${groundSize}u vs ${needed.toFixed(0)}u needed to reach the boundary`,
 );
 check(
   "ground covers the UFO Pendulum's full swing",
@@ -263,7 +265,6 @@ const even = (a: number, b: number, c: number) => Math.max(a, b, c) - Math.min(a
 check("Ferris Wheel carries 30-40 cabins", inBand(CABINS.length), `${CABINS.length}`);
 check("Roller Coaster carries 30-40 seats", inBand(COASTER_SEATS), `${COASTER_SEATS}`);
 check("Monster Ride carries 30-40 seats", inBand(MONSTER_RIDERS.length), `${MONSTER_RIDERS.length}`);
-check("Park Train carries 30-40 seats", inBand(TRAIN_RIDERS.length), `${TRAIN_RIDERS.length}`);
 check(
   "Dragon Ride carries 30-40 seats, evenly banded",
   inBand(DRAGON_SEATS) &&

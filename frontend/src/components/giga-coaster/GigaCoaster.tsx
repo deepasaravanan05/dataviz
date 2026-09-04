@@ -6,7 +6,8 @@ import { Station } from "./Station";
 import { Track } from "./Track";
 import { Train, type TrainHandle } from "./Train";
 import { validateGigaCoaster } from "./constants";
-import { CYCLE_SECONDS, trainStateAt } from "./coasterMotion";
+import { runDistanceAt } from "./coasterMotion";
+import { rideAnimationSecondsNow } from "@/simulation/journey/activeRideOps";
 import { RIDE_FACING, RIDE_ORIGIN } from "./placement";
 
 /**
@@ -28,29 +29,38 @@ import { RIDE_FACING, RIDE_ORIGIN } from "./placement";
  * to make. The frame loop reads that table and does no physics of its own, so
  * a dropped frame cannot leave the train off its own phase.
  *
- * THE RIDE KEEPS ITS OWN CLOCK — real seconds since the page opened, wrapped
- * at the cycle length. It is an attraction rather than a department ride, so
- * nobody is dispatched on it and it simply runs, as the park's other
- * attractions do.
+ * THE RIDE RUNS ON THE PARK'S SCHEDULE, not on a clock of its own.
  *
- * WHERE IT STANDS. It positions itself from `RIDE_ORIGIN`, searched in
- * placement.ts for the nearest ground to the Tea Cups that clears every margin
- * the park keeps, and turns its long side to the entrance so the lift hill and
- * the drop read as a lift hill and a drop. Mounted in world space with no
- * offset and no scale of its own, adding no light and no camera, and not in
- * the park layout.
+ * It used to keep its own — real seconds since the page opened — because it was
+ * an attraction nobody was dispatched on. It is DevOps's ride now: employees
+ * walk up to it, and the ride has to be standing still in its station when they
+ * do. `rideAnimationSecondsNow` is the ride-operations clock, and it reads
+ * exactly zero whenever the schedule says this ride is stopped — which is the
+ * pose the train is drawn on its station mark in, and the pose the boarding
+ * platform was solved against. So the train stands for each arrival, takes them
+ * aboard, runs a whole number of circuits and comes home to the same mark.
+ *
+ * `runDistanceAt` is the circuit alone: the ride's own LOAD and UNLOAD dwell is
+ * gone from it, because how long the train waits in the station is now the
+ * employees' business rather than a constant.
+ *
+ * WHERE IT STANDS. It positions itself from `RIDE_ORIGIN` — its own slot on the
+ * park ring — and turns its long side to the middle so the lift hill and the
+ * drop read as a lift hill and a drop. Mounted in world space with no offset
+ * and no scale of its own, adding no light and no camera. It has a place in the
+ * park layout now, at exactly that slot and at exactly the size it declares, so
+ * that employees can be routed to it; nothing about where it stands or how big
+ * it is changed to get one.
  */
 export function GigaCoaster() {
   const train = useRef<TrainHandle>(null);
-  const clock = useRef(0);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") validateGigaCoaster();
   }, []);
 
-  useFrame((_, delta) => {
-    clock.current = (clock.current + delta) % CYCLE_SECONDS;
-    train.current?.setDistance(trainStateAt(clock.current).distance);
+  useFrame(() => {
+    train.current?.setDistance(runDistanceAt(rideAnimationSecondsNow("giga")));
   });
 
   return (

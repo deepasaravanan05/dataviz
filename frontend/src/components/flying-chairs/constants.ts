@@ -1,20 +1,3 @@
-import {
-  FOOD_COURT_CENTER,
-  FOOD_COURT_HALF,
-  GATE_X,
-  GATE_Z,
-} from "@/simulation/journey/constants";
-import {
-  MAIN_VIEWPOINT,
-  PARK_CENTER,
-  PARK_LAYOUT,
-  PLAZA_CENTER,
-  PLAZA_RADIUS,
-  viewAngles,
-} from "@/components/park/layout";
-import { TRAIN_SCALE } from "@/components/park/parkScale";
-import { TRACK_CURVE } from "@/components/park-train/trainTrack";
-import { TRACK_HALF_WIDTH_METRES } from "@/components/park-train/constants";
 import { HUMAN, METRE as WORLD_METRE, PROP } from "@/world/scale";
 import { UNIFORM_RIDE_HEIGHT } from "@/components/park/uniformRideHeight";
 
@@ -343,142 +326,6 @@ export const OVERALL_REACH = Math.max(
   FLIGHT_RADIUS + SEAT_DEPTH * CHAIR_SCALE + 0.1,
 );
 
-/* ------------------------------------------------------------------ *
- * WHERE IT STANDS — solved against the park, not typed
- * ------------------------------------------------------------------ */
-
-/**
- * Directly behind the food court, on the court's own bearing from the gate.
- *
- * The ride was first built behind the sky tower and has now been asked for
- * behind the food court instead, so the anchor changes and the method does
- * not: "behind" is still a direction rather than a coordinate, still taken
- * from the gate, and still resolved by pushing the ride out along that line
- * until it clears everything the park already has. Only the thing it stands
- * behind is different.
- *
- * The two sideways nudges the tower placement carried — five steps to the
- * right — went with the tower. They existed to settle the ride inside the
- * tower's slice of the view from the gate, and that is a silhouette this ride
- * no longer stands in, so carrying the offset forward would be keeping an
- * arbitrary 3.75 m for no reason anybody could read back.
- *
- * The distance is the nearest the ride can stand on that line while keeping
- * 12 m of clear ground to every ride footprint, 10 m to the railway, 8 m to
- * every department sign, the plaza and the food court, and 6 m to any paving —
- * measured from OVERALL_REACH, which is the flight circle plus a chair, not
- * the column. A swept chair is what arrives at the neighbour first.
- *
- * Behind the court, the court itself is what binds rather than a ride: it is
- * an 82 m square and this bearing leaves it corner-ward, so the constraint set
- * admits the ride from 91.4 m out from the court's centre. 95 m is used, which
- * stands the swept circle 37.3 m off the court's corner against the 33.7 m it
- * owes — a few metres in hand, the same margin the tower placement was given.
- * verify-flying-chairs.ts re-measures the whole set.
- */
-/**
- * IT IS SOLVED NOW, NOT TYPED — because the park it was measured against has
- * been rebuilt.
- *
- * Ninety-five metres was the right answer when this ride's swept circle was
- * 25.7 m and its neighbours were the size they were. Every ride in the park is
- * now built to one common height, which grew this one's circle to 37.8 m and
- * the UFO Pendulum's to 80.8 m — and at ninety-five metres the chairs stood
- * 26 m from the pendulum against the 49.8 m the park's own margins ask for.
- * A number that was measured against a park that no longer exists is worse
- * than no number, so the distance is searched the same way every other
- * attraction here searches: straight out along the bearing, a metre at a time,
- * to the first place the ground will take it.
- *
- * The margins are the park's: 12 m to any ride footprint, 10 m past the rail to
- * the railway, 8 m to the plaza ring and the food court it stands behind — all
- * measured from OVERALL_REACH, because a swept chair is what arrives at a
- * neighbour first. Signs are not in this set on purpose: the boards are placed
- * after the rides and it is `rideSigns.ts` that keeps them off this ride's
- * circle, which is the only way round that is not a circular one.
- */
-const RAILS: [number, number][] = Array.from({ length: 721 }, (_, i) => {
-  const p = TRACK_CURVE.getPointAt(i / 720);
-  return [p.x * TRAIN_SCALE, p.z * TRAIN_SCALE];
-});
-
-export const PLACEMENT_MARGINS = {
-  ride: 12,
-  railway: 10,
-  plaza: 8,
-  foodCourt: 8,
-} as const;
-
-function chairsShortfallAt(x: number, z: number): number {
-  const reach = OVERALL_REACH;
-  const rides = Math.min(
-    ...PARK_LAYOUT.map((r) =>
-      Math.hypot(Math.max(r.minX - x, 0, x - r.maxX), Math.max(r.minZ - z, 0, z - r.maxZ)),
-    ),
-  );
-  const railway = Math.min(...RAILS.map(([rx, rz]) => Math.hypot(x - rx, z - rz)));
-  const plaza = Math.abs(
-    Math.hypot(x - PLAZA_CENTER[0], z - PLAZA_CENTER[1]) - PLAZA_RADIUS,
-  );
-  const court = Math.hypot(
-    Math.max(Math.abs(x - FOOD_COURT_CENTER[0]) - FOOD_COURT_HALF, 0),
-    Math.max(Math.abs(z - FOOD_COURT_CENTER[1]) - FOOD_COURT_HALF, 0),
-  );
-  return Math.min(
-    rides - (reach + PLACEMENT_MARGINS.ride),
-    railway - (reach + TRACK_HALF_WIDTH_METRES + PLACEMENT_MARGINS.railway),
-    plaza - (reach + PLACEMENT_MARGINS.plaza),
-    court - (reach + PLACEMENT_MARGINS.foodCourt),
-  );
-}
-
-/**
- * And it must not stand in FRONT of another ride from the entrance.
- *
- * The park's five silhouettes were separated angularly on purpose, and this
- * ride is big enough now to cover one: at the first distance that cleared every
- * margin it sat squarely across the UFO Pendulum's slice of the view. Standing
- * further out on the same bearing walks it out of that slice, which is what the
- * search does.
- */
-function hidesARideFromGate(x: number, z: number): boolean {
-  const ux = PARK_CENTER[0] - MAIN_VIEWPOINT[0];
-  const uz = PARK_CENTER[1] - MAIN_VIEWPOINT[1];
-  const ul = Math.hypot(ux, uz) || 1;
-  const dx = x - MAIN_VIEWPOINT[0];
-  const dz = z - MAIN_VIEWPOINT[1];
-  const distance = Math.hypot(dx, dz) || 1;
-  const bearing =
-    (Math.atan2((ux / ul) * dz - (uz / ul) * dx, dx * (ux / ul) + dz * (uz / ul)) * 180) / Math.PI;
-  const half = (Math.atan(OVERALL_REACH / distance) * 180) / Math.PI;
-  return viewAngles(MAIN_VIEWPOINT, PARK_CENTER).some(
-    (a) =>
-      bearing + half > a.bearingDeg - a.halfWidthDeg &&
-      bearing - half < a.bearingDeg + a.halfWidthDeg &&
-      distance < a.distance,
-  );
-}
-
-export const BEHIND_DISTANCE = (() => {
-  const dx = (FOOD_COURT_CENTER[0] - GATE_X) / (Math.hypot(FOOD_COURT_CENTER[0] - GATE_X, FOOD_COURT_CENTER[1] - GATE_Z) || 1);
-  const dz = (FOOD_COURT_CENTER[1] - GATE_Z) / (Math.hypot(FOOD_COURT_CENTER[0] - GATE_X, FOOD_COURT_CENTER[1] - GATE_Z) || 1);
-  for (let d = FOOD_COURT_HALF + OVERALL_REACH; d <= 1200; d += 1) {
-    const x = FOOD_COURT_CENTER[0] + dx * d;
-    const z = FOOD_COURT_CENTER[1] + dz * d;
-    if (chairsShortfallAt(x, z) >= 6 && !hidesARideFromGate(x, z)) return d;
-  }
-  throw new Error("No ground behind the food court clears every margin the Flying Chairs need");
-})();
-
-const toCourtX = FOOD_COURT_CENTER[0] - GATE_X;
-const toCourtZ = FOOD_COURT_CENTER[1] - GATE_Z;
-const toCourtLength = Math.hypot(toCourtX, toCourtZ) || 1;
-
-/** World position of the column's centre line. */
-export const RIDE_CENTER: [number, number] = [
-  FOOD_COURT_CENTER[0] + (toCourtX / toCourtLength) * BEHIND_DISTANCE,
-  FOOD_COURT_CENTER[1] + (toCourtZ / toCourtLength) * BEHIND_DISTANCE,
-];
 
 /* ------------------------------------------------------------------ *
  * LOADING — THE SWEEP COMES DOWN, AND THERE IS A WAY UP TO IT
@@ -597,8 +444,8 @@ export const LADDER_CAGE_FROM_Y = 2.2 * WORLD_METRE;
 export const LADDER_CAGE_PITCH = 0.9 * WORLD_METRE;
 export const LADDER_CAGE_RADIUS = 0.38 * WORLD_METRE;
 
-/** Bearing from the ride to the main gate — the side the ladder is put on. */
-export const LADDER_AZIMUTH = Math.atan2(GATE_Z - RIDE_CENTER[1], GATE_X - RIDE_CENTER[0]);
+/* LADDER_AZIMUTH — which way round the ladder goes — depends on where the ride
+   stands, so it lives with the placement in ./placement.ts. */
 /**
  * The opening left in the inner hand rail for a rider to step through at the
  * top of the ladder: the ladder's own width and a clear half metre either

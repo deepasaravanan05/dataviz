@@ -1,15 +1,22 @@
 import { PARK_CENTER, PARK_LAYOUT, PLAZA_CENTER, rideById } from "@/components/park/layout";
+import {
+  FOOD_COURT_PATH_RADIUS,
+  FOOD_COURT_PLAZA_RADIUS,
+  PARK_PAVED_EDGE,
+  PERIMETER_ROAD_RADIUS,
+  RIDE_RING_OUTER_EDGE,
+  ringPoint,
+} from "@/components/park/parkRing";
 import { RIDE_DEPARTMENTS, type DepartmentRideId } from "@/components/park/departments";
 import { FOOD_COURT_CENTER, GATE_X, GATE_Z } from "@/simulation/journey/constants";
-import { TRAIN_RIDE_NAME, TRAIN_TEAM_ID, TRAIN_TEAM_NAME } from "@/components/park/trainTeam";
 import {
   CHAIRS_RIDE_NAME,
   CHAIRS_TEAM_ID,
   CHAIRS_TEAM_NAME,
   OVERALL_HEIGHT as CHAIRS_HEIGHT,
   OVERALL_REACH as CHAIRS_REACH,
-  RIDE_CENTER as CHAIRS_CENTER,
 } from "@/components/flying-chairs/constants";
+import { RIDE_CENTER as CHAIRS_CENTER } from "@/components/flying-chairs/placement";
 import {
   LOOPER_RIDE_ID,
   LOOPER_RIDE_NAME,
@@ -26,11 +33,7 @@ import {
   OVERALL_REACH as TEACUPS_REACH,
 } from "@/components/tea-cups/constants";
 import { RIDE_CENTER as TEACUPS_CENTER } from "@/components/tea-cups/placement";
-import { GIGA_RIDE_ID, GIGA_RIDE_NAME } from "@/components/giga-coaster/constants";
-import {
-  OVERALL_HEIGHT as GIGA_HEIGHT,
-  OVERALL_REACH as GIGA_REACH,
-} from "@/components/giga-coaster/envelope";
+import { OVERALL_REACH as GIGA_REACH } from "@/components/giga-coaster/envelope";
 import { RIDE_CENTER as GIGA_CENTER } from "@/components/giga-coaster/placement";
 import {
   DUMBO_RIDE_ID,
@@ -40,8 +43,6 @@ import {
   OVERALL_REACH as DUMBO_REACH,
 } from "@/components/dumbo-ride/constants";
 import { RIDE_CENTER as DUMBO_CENTER } from "@/components/dumbo-ride/placement";
-import { TRACK_CENTER, TRACK_RADIUS_X, TRACK_RADIUS_Z } from "@/components/park-train/constants";
-import { TRAIN_SCALE } from "@/components/park/parkScale";
 
 /**
  * Named viewpoints the camera can travel to.
@@ -60,15 +61,26 @@ export interface CameraPlace {
   lookAt: [number, number, number];
 }
 
-/** Frames a subject of the given radius and height from the gate side. */
+/**
+ * Frames a subject of the given radius and height from the side people
+ * approach it from — which, in a concentric park, is the INWARD side.
+ *
+ * It used to frame from the gate. That was the same thing while every ride
+ * stood in a fan in front of the entrance; on a ring it is not, because for
+ * the attractions at the back of the park the gate is on the far side of the
+ * lake and framing "from the gate" means standing behind the ride. What holds
+ * for all ten is that they are entered off the ring path, so the camera stands
+ * between the ride and the middle of the park, which is also the side the
+ * queue, the plaza and the boarding steps are on.
+ */
 function frame(
   center: readonly [number, number],
   radius: number,
   height: number,
   pull = 2.1,
 ): { position: [number, number, number]; lookAt: [number, number, number] } {
-  const dx = GATE_X - center[0];
-  const dz = GATE_Z - center[1];
+  const dx = PARK_CENTER[0] - center[0];
+  const dz = PARK_CENTER[1] - center[1];
   const len = Math.hypot(dx, dz) || 1;
   const distance = Math.max(radius * pull + 26, height * 1.8 + 24);
   return {
@@ -124,12 +136,19 @@ const PARK_REACH = (() => {
     take(c[0], c[1] + k);
     take(c[0], c[1] - k);
   }
-  /* And the railway, which is the park's outline in this view. */
+  /*
+   * AND THE OUTER CIRCULAR PATH, which is the park's outline in this view.
+   *
+   * It used to be the railway that drew that outline. The train and its track
+   * have been removed, so the outermost thing the overview has to hold is the
+   * path that joins the ride platforms — which is what the plan uses to
+   * describe the park's extent anyway.
+   */
   for (let i = 0; i < 96; i++) {
     const a = (i / 96) * Math.PI * 2;
     take(
-      (TRACK_CENTER[0] + Math.cos(a) * TRACK_RADIUS_X) * TRAIN_SCALE,
-      (TRACK_CENTER[1] + Math.sin(a) * TRACK_RADIUS_Z) * TRAIN_SCALE,
+      PARK_CENTER[0] + Math.cos(a) * PARK_PAVED_EDGE,
+      PARK_CENTER[1] + Math.sin(a) * PARK_PAVED_EDGE,
     );
   }
   return reach;
@@ -158,22 +177,49 @@ const PARK_REACH = (() => {
   });
 }
 
-/** Mid park: several rides, the food court and the paths all legible at once. */
+/**
+ * HOW CLOSE THE CAMERA MAY ORBIT.
+ *
+ * Its far counterpart, ORBIT_MAX_DISTANCE, is solved below from the overview
+ * itself: the shot the park opens on stands back far enough for the whole
+ * property to fit the lens, and an orbit limit shorter than that would snap
+ * the opening framing inward on the viewer's first drag — which is what a
+ * remembered 1800 did once the park grew.
+ */
+export const ORBIT_MIN_DISTANCE = 30;
+
+/**
+ * Mid park: the entrance half of the ring — the lake, the two big rides that
+ * flank the avenue, and the ring path joining them.
+ *
+ * Placed off the ring's own geometry rather than at a remembered offset: high
+ * over the entrance side, far enough out to hold the ride ring's near arc in
+ * the frame, aimed at the lake.
+ */
+const MID_STAND = ringPoint(14, RIDE_RING_OUTER_EDGE * 0.95);
 places.push({
   id: "mid",
   label: "Mid park",
   group: "park",
-  position: [PARK_CENTER[0] + 150, 118, PARK_CENTER[1] + 400],
-  lookAt: [PARK_CENTER[0] + 20, 26, PARK_CENTER[1] + 40],
+  position: [MID_STAND[0], RIDE_RING_OUTER_EDGE * 0.42, MID_STAND[1]],
+  lookAt: [PARK_CENTER[0], 30, PARK_CENTER[1]],
 });
 
-/** Ground level: standing on the promenade, looking down it. */
+/**
+ * Ground level: standing where the avenue meets the food court's circular
+ * path, looking straight in at the court.
+ *
+ * The stance follows the plan rather than a remembered offset: this is the
+ * junction a visitor actually arrives at, and what they see from it is the
+ * centrepiece.
+ */
+const GROUND_STAND = ringPoint(0, FOOD_COURT_PATH_RADIUS);
 places.push({
   id: "ground",
   label: "Ground level",
   group: "park",
-  position: [PLAZA_CENTER[0] + 6, 2.4, PLAZA_CENTER[1] + 150],
-  lookAt: [PLAZA_CENTER[0] - 4, 12, PLAZA_CENTER[1] - 60],
+  position: [GROUND_STAND[0], 2.4, GROUND_STAND[1]],
+  lookAt: [PLAZA_CENTER[0], 26, PLAZA_CENTER[1] + FOOD_COURT_PLAZA_RADIUS * 0.4],
 });
 
 places.push({
@@ -185,8 +231,40 @@ places.push({
 });
 
 {
-  const f = frame(FOOD_COURT_CENTER, 30, 14, 1.9);
-  places.push({ id: "food-court", label: "Food court", group: "facility", ...f });
+  /*
+   * THE FOOD COURT'S OWN VIEW, framed on the COURT rather than on the
+   * pavilion inside it.
+   *
+   * It used to be framed as a 30 m subject 14 m tall, which was the old
+   * pavilion standing on its own beside the avenue. The court is now the
+   * park's centrepiece — a 500 m plaza with a colonnade, a ring of stalls and
+   * thirty tables around that hall — so a camera framed on the hall shows a
+   * roof filling the screen with the court out of shot on every side.
+   *
+   * `frame()` sets its distance from the subject's radius and height, so
+   * handing it the plaza's radius and the colonnade's height is all that is
+   * needed; the stance, the elevation and the look-at all follow.
+   */
+  /*
+   * `frame()` CANNOT BE USED FOR THIS ONE, and the reason is worth stating.
+   * It stands the camera between its subject and the middle of the park — the
+   * side people approach from — and this subject IS the middle of the park, so
+   * that direction is undefined. Fed the court, it divided by a zero-length
+   * vector and parked the camera inside the pavilion.
+   *
+   * The court's own approach is the entrance avenue, so the viewpoint stands
+   * on it: out along bearing zero far enough for the whole 500 m plaza to fit
+   * the park's 46-degree lens, high enough to see over the colonnade and into
+   * the seating, looking at the hall.
+   */
+  const stand = ringPoint(0, FOOD_COURT_PLAZA_RADIUS * 2.2);
+  places.push({
+    id: "food-court",
+    label: "Food court",
+    group: "facility",
+    position: [stand[0], FOOD_COURT_PLAZA_RADIUS * 0.55, stand[1]],
+    lookAt: [FOOD_COURT_CENTER[0], 20, FOOD_COURT_CENTER[1]],
+  });
 }
 
 /**
@@ -204,6 +282,8 @@ const DEPARTMENT_NAV_ORDER: DepartmentRideId[] = [
   "ferris",
   "monster",
   "ufo",
+  /* The Giga Coaster reads last, where its own standalone chip used to sit. */
+  "giga",
 ];
 
 const departmentsInNavOrder = [...RIDE_DEPARTMENTS].sort((a, b) => {
@@ -216,7 +296,7 @@ const departmentsInNavOrder = [...RIDE_DEPARTMENTS].sort((a, b) => {
 
 for (const d of departmentsInNavOrder) {
   const ride = rideById(d.rideId);
-  const f = frame(ride.center, Math.max(ride.halfX, ride.halfZ), ride.height);
+  const f = frame(ride.center, Math.hypot(ride.halfX, ride.halfZ), ride.height);
   places.push({
     id: d.rideId,
     label: `${d.department} — ${d.rideName}`,
@@ -226,37 +306,26 @@ for (const d of departmentsInNavOrder) {
 }
 
 /*
- * The Park Train's chip.
+ * THE PARK TRAIN'S CHIP IS GONE, with the train.
  *
- * Added after the department chips rather than among them, because the train
- * is not a department ride: it carries the DevOps team's NAME, not its people.
- *
- * `frame()` above is no use here. It sizes a viewpoint for a compact object
- * standing on the ground, and this subject is the 850 m rail loop, twice the
- * width of the whole ride fan; fed to `frame()` the camera ends up 26 m up
- * looking at the near rail with the rest of the loop off both sides of the
- * screen. So the stance was solved instead — the real TRACK_CURVE, sampled at
- * 720 points and projected through the park's own 46-degree camera at 16:9,
- * swept across distance and altitude for the fullest frame that still holds
- * every point of the rail with a 6% margin. It came out at 1.670 loop radii
- * back and 0.340 radii up. Kept as RATIOS of the loop's own radius rather than
- * as world coordinates, so widening the track moves the viewpoint with it.
+ * There was a solved viewpoint here for the railway loop — `frame()` was no
+ * use for a subject twice the width of the whole park, so the stance was swept
+ * out to 1.67 loop radii back and 0.34 up, kept as ratios of the loop's own
+ * radius. The train and its track have been removed at the user's request, and
+ * the DevOps name it carried now belongs to the Giga Coaster, which has a chip
+ * of its own further down.
  */
-{
-  const center: [number, number] = [TRACK_CENTER[0] * TRAIN_SCALE, TRACK_CENTER[1] * TRAIN_SCALE];
-  const radius = Math.max(TRACK_RADIUS_X, TRACK_RADIUS_Z) * TRAIN_SCALE;
-  const dx = GATE_X - center[0];
-  const dz = GATE_Z - center[1];
-  const len = Math.hypot(dx, dz) || 1;
-  const distance = radius * 1.67;
-  places.push({
-    id: TRAIN_TEAM_ID,
-    label: `${TRAIN_TEAM_NAME} — ${TRAIN_RIDE_NAME}`,
-    group: "department",
-    position: [center[0] + (dx / len) * distance, radius * 0.34, center[1] + (dz / len) * distance],
-    lookAt: [center[0], 0, center[1]],
-  });
-}
+
+
+/*
+ * THE PARK TRAIN'S CHIP IS GONE, with the train.
+ *
+ * There was a solved viewpoint here for the railway loop — `frame()` was no
+ * use for a subject that ringed the whole park, so the stance was swept out to
+ * 1.67 loop radii back and 0.34 up, kept as ratios of the loop's own radius.
+ * The train, its track and its route have been removed at the user's request,
+ * and the DevOps name its chip carried went with them.
+ */
 
 /*
  * The Flying Chairs' chip.
@@ -412,18 +481,6 @@ for (const d of departmentsInNavOrder) {
   });
 }
 
-/*
- * The Giga Coaster's chip.
- *
- * Named for Finance, so it reads team-then-ride like the other team chips and
- * sits with them rather than with the facilities. Its subject is three hundred metres across, so `frame()`
- * stands well back from it — which is the same rule every other chip uses,
- * simply applied to a bigger thing.
- */
-{
-  const f = frame(GIGA_CENTER, GIGA_REACH, GIGA_HEIGHT);
-  places.push({ id: GIGA_RIDE_ID, label: GIGA_RIDE_NAME, group: "facility", ...f });
-}
 
 /*
  * The Dumbo Ride's chip.
@@ -469,7 +526,54 @@ for (const d of departmentsInNavOrder) {
   });
 }
 
+/*
+ * THE GIGA COASTER'S OWN CHIP IS GONE, because it has a better one.
+ *
+ * It stood here as a "facility" — an attraction with no department behind it —
+ * labelled simply "Giga Coaster". DevOps ride it now, so it is a department
+ * ride like the other five and the loop above gives it the chip they all get:
+ * the departments it serves, then its name. Leaving this one as well would have
+ * put two chips with the same id in the bar.
+ *
+ * Its framing is now the same rule every department ride's chip uses, which
+ * stands a little further back from a subject this wide than the bespoke line
+ * here did — the same `frame()`, given the ride's layout box rather than its
+ * track reach.
+ */
+
 export const CAMERA_PLACES: CameraPlace[] = places;
+
+/**
+ * HOW FAR THE CAMERA MAY PULL BACK.
+ *
+ * Two things have to fit inside it, and the larger wins:
+ *
+ *   - the OPENING SHOT, plus a little room to pull back past it. A limit
+ *     shorter than the shot the park opens on snaps the framing inward on the
+ *     viewer's first drag, which is what a remembered 1800 did once the park
+ *     grew past it;
+ *   - the WHOLE PROPERTY. The overview frames the park — the attractions and
+ *     the railway that rings them — and the property is larger than that: the
+ *     perimeter road and the main gate stand outside the railway. Somebody who
+ *     wants to see the boundary should be able to.
+ *
+ * Both are solved from the park's own geometry, so the limit follows it.
+ */
+export const ORBIT_MAX_DISTANCE = (() => {
+  const o = places.find((p) => p.id === "overview")!;
+  const overview = Math.hypot(
+    o.position[0] - o.lookAt[0],
+    o.position[1] - o.lookAt[1],
+    o.position[2] - o.lookAt[2],
+  );
+  const property = Math.max(
+    PERIMETER_ROAD_RADIUS,
+    Math.hypot(GATE_X - PARK_CENTER[0], GATE_Z - PARK_CENTER[1]),
+  );
+  const frameProperty =
+    (property / Math.tan((OVERVIEW_FOV_DEG / 2) * (Math.PI / 180))) * 1.06;
+  return Math.max(overview * 1.1, frameProperty);
+})();
 
 export function placeById(id: string): CameraPlace {
   const p = CAMERA_PLACES.find((c) => c.id === id);

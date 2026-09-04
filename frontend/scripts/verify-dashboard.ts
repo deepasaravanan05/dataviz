@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { SIMULATION_DATES } from "../src/store/employeeDataStore";
 import { join } from "node:path";
 import { DEPARTMENTS, RIDE_DEPARTMENTS } from "../src/components/park/departments";
 import {
@@ -127,7 +128,9 @@ for (const t of [9 * 60 + 30, 10 * 60, 10 * 60 + 30]) {
   );
   const avgOk = rows.every((r) => {
     const staff = JOURNEY_EMPLOYEES.filter((e) => e.department === r.department);
-    const avg = staff.reduce((s, e) => s + e.delayMinutes, 0) / staff.length;
+    /* The sheet's own whole-minute Delay Time column, which is what the table
+       prints and what every other surface averages. */
+    const avg = staff.reduce((s, e) => s + e.reportedDelayMinutes, 0) / staff.length;
     return Math.abs(avg - r.avgDelay) < 1e-9;
   });
   check("per-department average delay matches an independent recompute", avgOk, "to the minute");
@@ -198,28 +201,42 @@ check(
       "Ground level",
       "Main entrance",
       "Food court",
-      /* The Giga Coaster carries no team name either. */
-      "Giga Coaster",
+      /*
+       * The Giga Coaster's own "Giga Coaster" chip used to sit here, among the
+       * places that carry no department. It is a department ride now — DevOps
+       * walk to it and get in — so it has moved down into the department chips
+       * and prints the department it serves, exactly as the other five do.
+       */
+      /* The department chips print what the ride's sign prints: its own name
+         where the user gave it one, and otherwise the departments it serves,
+         joined the way every surface in the park joins them. The workbook's
+         spelling is its own — lower case, short form — and these are those
+         departments, not a rewording of them. */
       "Testing",
-      "Cyber Security",
+      "cyber · risk",
       "Developers",
-      "ERP",
-      "Data Engineering",
-      /* The Park Train is not a department ride; its chip carries the DevOps
-         team label and sits after the five — see trainTeam.ts. */
-      "DevOps",
+      "erp · admin",
+      "data · ml",
+      /* The Giga Coaster, last of the department chips. */
+      "devops",
+      /* The Park Train's DevOps chip used to sit here, first of the team
+         chips. The train, its track and its route have been removed from the
+         park, and DevOps was only ever a label on its board — so the chip has
+         gone with the ride rather than being handed to another one. */
       /* The Flying Chairs are not a department ride either; their chip
          carries the IT Support team label — see flying-chairs/constants.ts. */
       "IT Support",
       /* Nor is the Super Looper, which the user named for UI/UX — a label on a
-         signboard, not a routing destination. UI/UX staff still walk to the
-         Ferris Wheel. See super-looper/constants.ts. */
+         signboard, not a routing destination. The workbook calls that
+         department "design", and design staff still walk to the Ferris Wheel.
+         See super-looper/constants.ts. */
       "UI/UX",
-      /* And the Tea Cups, which the user named for Risk — a team that is not in
-         the roster at all, so there is not even anybody to re-route. */
+      /* And the Tea Cups, which the user named for Risk. The workbook does have
+         a "risk" department now; its people walk to the Dragon Ride, exactly as
+         the mapping says, and this chip stays a label on a signboard. */
       "Risk",
-      /* And the Dumbo Ride, which the user named for Finance — another team
-         with nobody in the roster to re-route. */
+      /* And the Dumbo Ride, which the user named for Finance — likewise a label:
+         "finance" staff walk to the Roller Coaster. */
       "Finance",
     ];
     check(
@@ -228,22 +245,26 @@ check(
       nav.join(" | "),
     );
     check(
-      "Central plaza is gone, and Data Engineering is last of the department rides",
+      "Central plaza is gone, and the Giga Coaster is last of the department rides",
       !nav.includes("Central plaza") &&
-        nav[nav.indexOf("DevOps") - 1] === "Data Engineering" &&
+        !nav.includes("Giga Coaster") &&
+        nav[nav.indexOf("IT Support") - 1] === "devops" &&
         /* The team chips trail the five, in the order their rides were added:
-           the Park Train, the Flying Chairs, and now the Super Looper, which
-           the user named for UI/UX. None of them is a routing destination. */
-        nav.slice(nav.indexOf("DevOps")).join(",") === "DevOps,IT Support,UI/UX,Risk,Finance",
-      "one chip removed, one moved to the end, and the five team chips after them",
+           the Flying Chairs, the Super Looper, the Tea Cups and the Dumbo
+           Ride. The Park Train led them until it was removed. None of them is
+           a routing destination. */
+        nav.slice(nav.indexOf("IT Support")).join(",") === "IT Support,UI/UX,Risk,Finance",
+      "one chip removed, the Giga Coaster moved down among the department rides, " +
+        "and the four team chips after them",
     );
     check(
       "reordering the chips did not reorder the park itself",
-      RIDE_DEPARTMENTS.map((d) => d.rideId).join(",") === "coaster,dragon,ferris,ufo,monster",
+      RIDE_DEPARTMENTS.map((d) => d.rideId).join(",") === "coaster,dragon,ferris,ufo,monster,giga",
       "RIDE_ORDER's shape untouched — paving, panel and dashboard unaffected. The fourth " +
         "slot reads `ufo` rather than `tower` because the Drop Tower was replaced by the " +
-        "UFO Pendulum at the user's request; the ORDER, which is what this check is about, " +
-        "never moved.",
+        "UFO Pendulum at the user's request, and the sixth is the Giga Coaster, APPENDED " +
+        "when DevOps was given it to ride; the order of the first five, which is what this " +
+        "check is about, never moved.",
     );
     check(
       "every ride is still reachable after the reorder",
@@ -280,11 +301,26 @@ check(
       "Calendar and Department-wise Count, each with its own icon",
     );
     check(
-      "the calendar keeps its July 2026 opening month and month navigation",
-      /OPENING_YEAR = 2026/.test(shell) &&
-        /OPENING_MONTH = 6/.test(shell) &&
-        /navigable/.test(shell),
-      "same CalendarCard props as before — nothing redesigned",
+      /* The opening month is no longer typed: it is read off the workbook's own
+         first date, which is July 2026 — the month the concept art opens on
+         too. Asserted as that property rather than as the literal, so a
+         different attendance file opens on its own first month. */
+      "the calendar opens on the dataset's own first month, with month navigation",
+      /SIMULATION_DATES\[0\]/.test(shell) &&
+        /navigable/.test(shell) &&
+        SIMULATION_DATES[0].startsWith("2026-07"),
+      `opens on ${SIMULATION_DATES[0].slice(0, 7)}, the first month the workbook records`,
+    );
+    check(
+      /* THE CALENDAR IS THE DATE PICKER. The workbook holds 49 working days and
+         the park animates one at a time, so this is where the Date (IST) column
+         is chosen — the dates it holds are clickable, and the one on screen
+         wears the pill. */
+      "and it is the picker for which date the park animates",
+      /selectableDates=\{SIMULATION_DATES\}/.test(shell) &&
+        /selectedDate=\{date\}/.test(shell) &&
+        /onSelectDate=\{selectDate\}/.test(shell),
+      `${SIMULATION_DATES.length} dates, ${SIMULATION_DATES[0]} to ${SIMULATION_DATES[SIMULATION_DATES.length - 1]}`,
     );
     check(
       "the department overview is the existing component, still fed the live clock",
@@ -382,9 +418,12 @@ check(
   {
     const store = readFileSync(join(root, "src", "store", "employeeDataStore.ts"), "utf8");
     check(
-      "the built-in dataset still runs the park when nothing is uploaded",
-      /rows\s*\?\?\s*EMPLOYEE_DATASET/.test(store),
-      "activeDataset() falls back to EMPLOYEE_DATASET",
+      /* With nothing uploaded, the park runs the workbook — the rows of
+         whichever date is selected, which is the whole point of the calendar
+         picker beside it. */
+      "the workbook still runs the park when nothing is uploaded",
+      /rows\s*\?\?\s*rowsForDate\(state\.date\)/.test(store),
+      "activeDataset() falls back to the selected date's own records",
     );
   }
   {

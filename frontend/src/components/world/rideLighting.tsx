@@ -38,7 +38,6 @@ import {
   RIDE_FACING as UFO_FACING,
   RIDE_ORIGIN as UFO_ORIGIN,
 } from "@/components/ufo-pendulum/placement";
-import { TRACK_CURVE as TRAIN_CURVE } from "@/components/park-train/trainTrack";
 import type { DepartmentRideId } from "@/components/park/departments";
 
 /**
@@ -119,12 +118,29 @@ export const RIDE_LOOK: Record<string, { look: LedLook; accent: string; label: s
     accent: "#22e07a",
     label: "green / teal",
   },
-  // The railway that rings the park — warm amber and gold, the whole loop.
-  train: {
-    look: { colorA: "#ffb020", colorB: "#ffe07a", speed: 0.06, cycles: 9, base: 0.35, gain: 1.9 },
-    accent: "#ffb020",
-    label: "amber / gold",
+  /*
+   * DEVOPS — amber running the circuit, breaking to yellow.
+   *
+   * The Giga Coaster needs an entry here because it is a department ride now:
+   * DevOps walk to it and get in, so it gets the plaza, the portal and the lit
+   * identity the other five have. Without one the plaza threw on mount, which
+   * nothing in the verify suite could catch — none of it renders.
+   *
+   * THE COLOURS ARE THE RIDE'S OWN. `CAR_COLORS` deals its train a run of
+   * red, amber and yellow liveries; these are the last two of them, so the
+   * ride is lit in the paint it is already wearing. The yellow sits 41 degrees
+   * of hue clear of its nearest neighbour on the wheel — the Dragon's orange —
+   * which is more than twice the separation the park's colour identities need
+   * to read apart from a kilometre up.
+   */
+  giga: {
+    look: { colorA: "#f0a02c", colorB: "#f2d64b", speed: 0.36, cycles: 3, base: 0.5, gain: 1.8 },
+    accent: "#f2d64b",
+    label: "amber / yellow",
   },
+  /* The railway used to have an entry here — amber and gold, run the whole
+     way round the loop. The train and its track have been removed from the
+     park, so its lighting went with them. */
 };
 
 /** Ferris Wheel: the rim, the intermediate ring, and spokes to the hub. */
@@ -338,22 +354,6 @@ function MonsterRig() {
       <LedStrip points={apron} look={{ ...look, base: 0.3, gain: 1 }} size={0.2} />
     </group>
   );
-}
-
-/**
- * The railway loop. Its lights ring the entire park, which from the overview
- * makes it the one landmark that draws the park's outline for you.
- */
-export function TrainRig() {
-  const { look } = RIDE_LOOK.train;
-  const track = useMemo(() => {
-    const N = 340;
-    return Array.from({ length: N }, (_, i) => {
-      const p = TRAIN_CURVE.getPointAt(i / N);
-      return new THREE.Vector3(p.x, p.y + 0.5, p.z);
-    });
-  }, []);
-  return <LedStrip points={track} look={look} size={0.13} haloScale={3} />;
 }
 
 /** The rig for one department ride, rendered inside that ride's own transform. */

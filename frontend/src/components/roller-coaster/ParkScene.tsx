@@ -8,8 +8,6 @@ import { FerrisWheel } from "@/components/ferris-wheel/FerrisWheel";
 import { ParkGround } from "@/components/ferris-wheel/ParkGround";
 import { RollerCoaster } from "./RollerCoaster";
 import { MonsterRide } from "@/components/monster-ride/MonsterRide";
-import { Track as TrainTrack } from "@/components/park-train/Track";
-import { ParkTrain } from "@/components/park-train/ParkTrain";
 import { FlyingChairs } from "@/components/flying-chairs/FlyingChairs";
 import { SuperLooper } from "@/components/super-looper/SuperLooper";
 import { TeaCups } from "@/components/tea-cups/TeaCups";
@@ -17,32 +15,45 @@ import { GigaCoaster } from "@/components/giga-coaster/GigaCoaster";
 import { DumboRide } from "@/components/dumbo-ride/DumboRide";
 import { UfoPendulum } from "@/components/ufo-pendulum/UfoPendulum";
 import { DragonRide } from "@/components/dragon-ride/DragonRide";
-import { TRAIN_SCALE } from "@/components/park/parkScale";
 import { SKY_THEMES } from "@/components/world/skyThemes";
 import { useSkyThemeStore } from "@/store/skyThemeStore";
 import { DoubleTapZoom } from "@/components/park/DoubleTapZoom";
 import { ParkJourney } from "@/components/park/journey/ParkJourney";
 import { RideDepartmentSigns } from "@/components/park/RideDepartmentSign";
 import { ParkEnvironment } from "@/components/world/ParkEnvironment";
-import { Fountain } from "@/components/world/Fountain";
 import { FerrisWheelBench } from "@/components/world/PromenadeBench";
 import { CameraDirector } from "@/components/world/CameraDirector";
 import { NightSky } from "@/components/world/NightSky";
-import { RideLights, TrainRig } from "@/components/world/rideLighting";
+import { RideLights } from "@/components/world/rideLighting";
 import { LedClock } from "@/components/world/led";
 import { RidePlazas } from "@/components/world/RidePlaza";
+import { RidePlatforms } from "@/components/world/RidePlatforms";
 import { RideHighlights, SelectableRide } from "@/components/park/SelectableRide";
 import { useRideSelectionStore } from "@/store/rideSelectionStore";
 import { useJourneyStore } from "@/store/journeyStore";
 import { useFoodCourtStore } from "@/store/foodCourtStore";
 import { PLAZA_CENTER, PLAZA_RADIUS, offsetFor, rideScale } from "@/components/park/layout";
+import { BOUNDARY_RADIUS, RIDE_RING_OUTER_EDGE } from "@/components/park/parkRing";
+import {
+  ORBIT_MAX_DISTANCE,
+  ORBIT_MIN_DISTANCE,
+  placeById,
+} from "@/components/world/cameraPlaces";
 
 /**
- * Opening shot: the solved full-park overview, from which every one of the six
- * rides holds its own share of the frame. See cameraPlaces.ts.
+ * Opening shot: the solved full-park overview, from which every one of the ten
+ * attractions holds its own share of the frame.
+ *
+ * IT IS NO LONGER TYPED HERE. It used to be the pair of triples the overview
+ * solver had produced at the time, copied across by hand — which meant that
+ * every time the park changed size the scene opened on last month's framing
+ * while the fast-travel chip for the very same view opened on this month's.
+ * The two are one number now: this reads `cameraPlaces.ts`, where the overview
+ * is re-solved from the park's own reach and the camera's own lens.
  */
-const CAMERA_POSITION: [number, number, number] = [398, 360, 887];
-const CAMERA_TARGET: [number, number, number] = [52, 24, 110];
+const OVERVIEW = placeById("overview");
+const CAMERA_POSITION: [number, number, number] = OVERVIEW.position;
+const CAMERA_TARGET: [number, number, number] = OVERVIEW.lookAt;
 
 export interface ParkSceneProps {
   /** Override framing, e.g. to focus a particular ride. */
@@ -50,8 +61,6 @@ export interface ParkSceneProps {
   cameraTarget?: [number, number, number];
   /** Show the per-employee time labels on the Monster Ride. */
   showRiderLabels?: boolean;
-  /** Show the per-employee time labels on the Park Train. */
-  showTrainLabels?: boolean;
   /** Show the per-employee time labels on the Dragon Swing Ship. */
   showDragonLabels?: boolean;
   /**
@@ -69,7 +78,6 @@ export function ParkScene({
   cameraPosition = CAMERA_POSITION,
   cameraTarget = CAMERA_TARGET,
   showRiderLabels = false,
-  showTrainLabels = false,
   showDragonLabels = false,
   cameraFov = DEFAULT_FOV,
 }: ParkSceneProps = {}) {
@@ -146,11 +154,17 @@ export function ParkScene({
         color={sky.key.color}
         castShadow
         shadow-mapSize={[4096, 4096]}
-        shadow-camera-left={-430}
-        shadow-camera-right={580}
-        shadow-camera-top={560}
-        shadow-camera-bottom={-420}
-        shadow-camera-far={2100}
+        /*
+          Square, centred on the park, and sized to the ride ring rather than to
+          a remembered bounding box. The park is concentric now, so a frustum
+          that was wider on one side than the other simply lost the shadows on
+          the narrow side; one radius covers every attraction equally.
+        */
+        shadow-camera-left={-RIDE_RING_OUTER_EDGE}
+        shadow-camera-right={RIDE_RING_OUTER_EDGE}
+        shadow-camera-top={RIDE_RING_OUTER_EDGE}
+        shadow-camera-bottom={-RIDE_RING_OUTER_EDGE}
+        shadow-camera-far={BOUNDARY_RADIUS * 3}
       />
       <directionalLight position={sky.fill.position} intensity={sky.fill.intensity} color={sky.fill.color} />
 
@@ -176,8 +190,13 @@ export function ParkScene({
       */}
       <ParkEnvironment />
 
-      {/* The central landmark: a fountain, never a ride. Routes bend around it. */}
-      <Fountain />
+      {/*
+        THE MIDDLE OF THE PARK IS THE GRAND FOOD COURT, and it renders with the
+        rest of the journey (see ParkJourney) because it is the one building
+        employees walk into. What stood here — first a fountain, then a lake
+        with a waterfall — is gone rather than moved: the brief replaces the
+        centrepiece outright.
+      */}
 
       {/* One wooden promenade bench, on open ground beside the Ferris Wheel and
           facing it. An addition; it touches nothing. */}
@@ -185,10 +204,15 @@ export function ParkScene({
 
       {/* Ground and plaza stay in unscaled world space. */}
       <ParkGround
-        // Half-extent 7000u. The camera can orbit out to 1800u and fog closes
-        // at 3800u, so the nearest edge is always at least 5200u away —
-        // permanently inside full fog, and therefore never visible.
-        size={20000}
+        /*
+          Half-extent 15000u. The camera can orbit out to about 2800u and the
+          fog is opaque from about 10100u, so the nearest edge is always at
+          least 12200u away — permanently inside full fog, and therefore never
+          visible. Both figures grew with the park: the radial plan is 2.2 km
+          across, the orbit limit stepped out to frame it, and the fog moved
+          out with the boundary so the park itself is not hazed.
+        */
+        size={30000}
         plazaRadius={PLAZA_RADIUS}
         plazaCenter={PLAZA_CENTER}
         // Warm evening landscape, matching the project's sunset reference:
@@ -314,26 +338,39 @@ export function ParkScene({
       <RideDepartmentSigns />
 
       {/*
+        The ten identical ride platforms: the same kerb, the same lit edge, the
+        same eight lamps and the same gateway where each radial path arrives.
+        This is the visible half of the plan's equality rule.
+      */}
+      <RidePlatforms />
+
+      {/*
         Lit entrance portals, queues, operator booths and landmark masts — one
         set per department, at the arrival point its employees already walk to.
       */}
       <RidePlazas />
 
-      {/* Track and train share one scale so the train can never leave its rails. */}
-      <group scale={TRAIN_SCALE}>
-        <TrainTrack />
-        <ParkTrain showLabels={showTrainLabels} />
-        {/* The lit loop that draws the park's outline from the overview. */}
-        <TrainRig />
-      </group>
+      {/*
+        THE PARK TRAIN, ITS TRACK AND ITS ROUTE USED TO RENDER HERE, on one
+        shared scale so the train could never leave its rails, with the lit loop
+        that drew the park's outline from the overview. All of it is removed at
+        the user's request — the ride, the railway, its team board and its
+        lighting are gone from the project, not merely unmounted.
+      */}
 
       <OrbitControls
         makeDefault
         target={cameraTarget}
-        minDistance={30}
-        // Far enough to frame the whole property from the main gate,
-        // close enough that the park never washes out into the fog.
-        maxDistance={1800}
+        minDistance={ORBIT_MIN_DISTANCE}
+        /*
+          Far enough to frame the whole property, and derived from the opening
+          shot rather than remembered. It was a fixed 1800; the park grew, the
+          solved overview now stands further back than that, and the controls
+          were snapping the opening framing inward on the first drag. Ten per
+          cent past the overview leaves somewhere to pull back to and still
+          stops well short of the fog.
+        */
+        maxDistance={ORBIT_MAX_DISTANCE}
         maxPolarAngle={Math.PI / 2.05}
       />
 

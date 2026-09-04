@@ -114,6 +114,20 @@ const GEO = {
   shrub: new THREE.SphereGeometry(1, 6, 5),
 };
 
+/**
+ * The kit's shared geometries, exposed so a caller that has HUNDREDS of one
+ * fitting can instance it instead of mounting the component that many times.
+ *
+ * The components above are the right thing for the tens of props an entrance
+ * or a food court places. They are the wrong thing for the park's street
+ * lighting: a lamp is six meshes, the ring path and the perimeter road want
+ * some five hundred lamps between them, and three thousand draw calls for the
+ * street lighting is more than the whole rest of the park costs. Same
+ * geometry, same materials, one InstancedMesh per part — see
+ * `ParkEnvironment.tsx`.
+ */
+export const KIT_GEO = GEO;
+
 export function LampPost({
   position,
   rotation = 0,
